@@ -27,7 +27,7 @@ const NID_RE = /^[a-z0-9][a-z0-9-]{0,30}$/i;
  *   urn:ai:domain:<domain>               → org-level domain entry
  *   urn:ai:domain:<domain>:agent:<slug>  → specific agent under a domain
  *   urn:ai:email:<email>                 → email-identity (personal agent)
- *   urn:ai:<domain>:<slug>               → legacy format (backward compat)
+ *   urn:ai:<domain>[:<slug>]             → legacy format (backward compat)
  */
 export function parseLocator(raw: string): ParsedLocator {
   const trimmed = raw.trim();
@@ -47,6 +47,9 @@ export function parseLocator(raw: string): ParsedLocator {
 
   if (!NID_RE.test(nid)) {
     throw new Error(`invalid locator "${trimmed}": NID "${nid}" is not valid`);
+  }
+  if (nid === 'urn') {
+    throw new Error(`invalid locator "${trimmed}": "urn" is a reserved NID`);
   }
 
   const segments = nss.split(':');
@@ -75,13 +78,16 @@ export function parseLocator(raw: string): ParsedLocator {
       throw new Error(`invalid locator "${trimmed}": domain component is empty`);
     }
 
-    // Optional :agent:<slug>
     let agentSlug: string | null = null;
-    if (segments[2]?.toLowerCase() === 'agent') {
-      agentSlug = segments[3] ?? null;
-      if (!agentSlug) {
-        throw new Error(`invalid locator "${trimmed}": agent slug is empty after ":agent:"`);
+    if (segments.length !== 2) {
+      if (
+        segments.length !== 4
+        || segments[2]?.toLowerCase() !== 'agent'
+        || !segments[3]
+      ) {
+        throw new Error(`invalid locator "${trimmed}": invalid domain locator shape`);
       }
+      agentSlug = segments[3];
     }
 
     return {
@@ -102,6 +108,9 @@ export function parseLocator(raw: string): ParsedLocator {
 
   if (!domain) {
     throw new Error(`invalid locator "${trimmed}": domain component is empty`);
+  }
+  if (segments.length > 2 || (segments.length === 2 && !agentSlug)) {
+    throw new Error(`invalid locator "${trimmed}": invalid legacy locator shape`);
   }
 
   return {

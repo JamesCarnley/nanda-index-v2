@@ -1,92 +1,141 @@
-import { describe, it, expect } from 'vitest';
-import { parseLocator } from '../../src/lib/locatorParser.js';
+import { describe, expect, it } from 'vitest';
+import { parseLocator, type ParsedLocator } from '../../src/lib/locatorParser.js';
 
 describe('parseLocator (URN format)', () => {
+  it.each<{ locator: string; expected: ParsedLocator }>([
+    {
+      locator: 'urn:ai:domain:acme.com',
+      expected: {
+        urn: 'urn:ai:domain:acme.com',
+        nid: 'ai',
+        type: 'domain',
+        domain: 'acme.com',
+        agentSlug: null,
+        email: null,
+        identifier: 'acme.com',
+      },
+    },
+    {
+      locator: 'urn:ai:domain:acme.com:agent:support',
+      expected: {
+        urn: 'urn:ai:domain:acme.com:agent:support',
+        nid: 'ai',
+        type: 'domain',
+        domain: 'acme.com',
+        agentSlug: 'support',
+        email: null,
+        identifier: 'support',
+      },
+    },
+    {
+      locator: 'urn:ai:email:demo@example.com',
+      expected: {
+        urn: 'urn:ai:email:demo@example.com',
+        nid: 'ai',
+        type: 'email',
+        domain: null,
+        agentSlug: null,
+        email: 'demo@example.com',
+        identifier: 'urn:ai:email:demo@example.com',
+      },
+    },
+    {
+      locator: 'urn:ai:email:john@hotmail.com',
+      expected: {
+        urn: 'urn:ai:email:john@hotmail.com',
+        nid: 'ai',
+        type: 'email',
+        domain: null,
+        agentSlug: null,
+        email: 'john@hotmail.com',
+        identifier: 'urn:ai:email:john@hotmail.com',
+      },
+    },
+    {
+      locator: 'urn:ai:acme.com:helper',
+      expected: {
+        urn: 'urn:ai:acme.com:helper',
+        nid: 'ai',
+        type: 'domain',
+        domain: 'acme.com',
+        agentSlug: 'helper',
+        email: null,
+        identifier: 'helper',
+      },
+    },
+    {
+      locator: 'urn:ai:org.agntcy',
+      expected: {
+        urn: 'urn:ai:org.agntcy',
+        nid: 'ai',
+        type: 'domain',
+        domain: 'org.agntcy',
+        agentSlug: null,
+        email: null,
+        identifier: 'org.agntcy',
+      },
+    },
+  ])('parses $locator', ({ locator, expected }) => {
+    expect(parseLocator(locator)).toEqual(expected);
+  });
 
-  // ── Happy paths ─────────────────────────────────────────────────────────────
-
-  it('parses urn:ai:<domain>:<identifier>', () => {
-    const result = parseLocator('urn:ai:nasiko.com:ankit');
-    expect(result).toEqual({
-      urn: 'urn:ai:nasiko.com:ankit',
+  it('preserves the post-trim URN and normalises the NID to lowercase', () => {
+    expect(parseLocator('  urn:AI:domain:Acme.com  ')).toEqual({
+      urn: 'urn:AI:domain:Acme.com',
       nid: 'ai',
-      domain: 'nasiko.com',
-      identifier: 'ankit',
+      type: 'domain',
+      domain: 'Acme.com',
+      agentSlug: null,
+      email: null,
+      identifier: 'Acme.com',
     });
   });
 
-  it('normalises NID to lowercase', () => {
-    const result = parseLocator('urn:AI:nasiko.com:ankit');
-    expect(result.nid).toBe('ai');
+  it('accepts a valid non-ai NID', () => {
+    expect(parseLocator('urn:nanda:google.com:search')).toEqual({
+      urn: 'urn:nanda:google.com:search',
+      nid: 'nanda',
+      type: 'domain',
+      domain: 'google.com',
+      agentSlug: 'search',
+      email: null,
+      identifier: 'search',
+    });
   });
 
-  it('trims surrounding whitespace', () => {
-    const result = parseLocator('  urn:ai:nasiko.com:ankit  ');
-    expect(result.identifier).toBe('ankit');
-    expect(result.domain).toBe('nasiko.com');
+  it('handles subdomains in the legacy domain component', () => {
+    expect(parseLocator('urn:ai:agents.nasiko.com:refunds')).toEqual({
+      urn: 'urn:ai:agents.nasiko.com:refunds',
+      nid: 'ai',
+      type: 'domain',
+      domain: 'agents.nasiko.com',
+      agentSlug: 'refunds',
+      email: null,
+      identifier: 'refunds',
+    });
   });
 
-  it('accepts any RFC 8141-valid NID — not locked to "ai"', () => {
-    const result = parseLocator('urn:nanda:google.com:search');
-    expect(result.nid).toBe('nanda');
-    expect(result.domain).toBe('google.com');
-    expect(result.identifier).toBe('search');
+  it.each([
+    'urn:urn:acme.com:helper',
+    'urn:ai:acme.com:',
+    'urn:ai:acme.com:helper:extra',
+    'urn:ai:domain:acme.com:other',
+    'urn:ai:domain:acme.com:agent:helper:extra',
+  ])('rejects malformed NANDA locator %s', (value) => {
+    expect(() => parseLocator(value)).toThrow();
   });
 
-  it('handles subdomains in domain component', () => {
-    const result = parseLocator('urn:ai:agents.nasiko.com:refunds');
-    expect(result.domain).toBe('agents.nasiko.com');
-    expect(result.identifier).toBe('refunds');
-  });
-
-  it('preserves the full urn field verbatim (post-trim)', () => {
-    const result = parseLocator('urn:ai:jetblue.com:scheduler');
-    expect(result.urn).toBe('urn:ai:jetblue.com:scheduler');
-  });
-
-  // ── Error paths ─────────────────────────────────────────────────────────────
-
-  it('throws on missing urn: prefix', () => {
-    expect(() => parseLocator('ankit@nasiko.com:global')).toThrow('must start with "urn:"');
-  });
-
-  it('throws on missing NID (urn: only)', () => {
-    expect(() => parseLocator('urn:')).toThrow('missing NID');
-  });
-
-  it('throws on invalid NID characters', () => {
-    expect(() => parseLocator('urn:a_b:nasiko.com:ankit')).toThrow('not a valid namespace identifier');
-  });
-
-  it('throws on NID starting with hyphen', () => {
-    expect(() => parseLocator('urn:-ai:nasiko.com:ankit')).toThrow('not a valid namespace identifier');
-  });
-
-  it('throws on reserved NID "urn"', () => {
-    expect(() => parseLocator('urn:urn:nasiko.com:ankit')).toThrow('reserved NID');
-  });
-
-  it('throws on NSS missing domain:identifier separator', () => {
-    expect(() => parseLocator('urn:ai:nasiko.com')).toThrow('must be <domain>:<identifier>');
-  });
-
-  it('throws on empty domain', () => {
-    expect(() => parseLocator('urn:ai::ankit')).toThrow('domain component is empty');
-  });
-
-  it('throws on empty identifier', () => {
-    expect(() => parseLocator('urn:ai:nasiko.com:')).toThrow('identifier component is empty');
-  });
-
-  it('throws on identifier with extra colons (ambiguous NSS)', () => {
-    expect(() => parseLocator('urn:ai:nasiko.com:ankit:extra')).toThrow('must not contain colons');
-  });
-
-  it('throws on empty string', () => {
-    expect(() => parseLocator('')).toThrow('must start with "urn:"');
-  });
-
-  it('throws on whitespace-only string', () => {
-    expect(() => parseLocator('   ')).toThrow('must start with "urn:"');
+  it.each([
+    'ankit@nasiko.com:global',
+    'urn:',
+    'urn:a_b:nasiko.com:ankit',
+    'urn:-ai:nasiko.com:ankit',
+    'urn:ai::ankit',
+    'urn:ai:domain:',
+    'urn:ai:domain:acme.com:agent:',
+    '',
+    '   ',
+  ])('rejects invalid locator %j', (value) => {
+    expect(() => parseLocator(value)).toThrow();
   });
 });

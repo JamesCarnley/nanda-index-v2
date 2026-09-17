@@ -225,12 +225,16 @@ interface IndexRecord {
 
 ### identifier URN formats
 
+The resolver accepts the explicit domain and email shapes and the two legacy
+domain shapes below. Other URN namespace-specific strings are not resolved.
+
 | Type | Format | Example |
 |------|--------|---------|
 | Enterprise / org | `urn:ai:domain:<domain>` | `urn:ai:domain:acme.com` |
 | Enterprise / agent | `urn:ai:domain:<domain>:agent:<slug>` | `urn:ai:domain:acme.com:agent:support` |
 | Personal | `urn:ai:email:<email>` | `urn:ai:email:john@hotmail.com` |
-| Custom | any valid URN | `urn:ai:org.agntcy` |
+| Legacy / org | `urn:ai:<domain>` | `urn:ai:org.agntcy` |
+| Legacy / agent | `urn:ai:<domain>:<slug>` | `urn:ai:acme.com:helper` |
 
 ---
 
