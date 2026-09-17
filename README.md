@@ -281,8 +281,9 @@ curl -X POST "${INDEX_BASE_URL}/api/ard/services/search" \
 Filters are exact and case-sensitive. Present fields are combined with AND;
 multiple values inside one field are combined with OR. Hard filters run before
 the page limit. To continue a result set, send the returned `pageToken` with
-the identical filter. This `jq` example requests the first one-item page and,
-when another page exists, requests the next page:
+the identical filter. Page tokens are unpadded base64url strings with a maximum
+length of 16,384 ASCII characters. This `jq` example requests the first one-item
+page and, when another page exists, requests the next page:
 
 ```bash
 FILTER='{

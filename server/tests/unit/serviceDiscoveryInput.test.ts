@@ -17,6 +17,8 @@ const validService = {
   interfaces: ['application/vnd.a2a+json'],
 };
 
+const MAX_PAGE_TOKEN_LENGTH = 16_384;
+
 function expectInvalid(run: () => unknown): void {
   try {
     run();
@@ -89,12 +91,26 @@ describe('parseServiceSearch', () => {
     for (const value of ['', ' padded', 'padded ', 'x'.repeat(513), 42]) {
       expectInvalid(() => parseServiceSearch({ filter: { interfaces: [value] } }));
     }
-    for (const pageToken of ['', 'x'.repeat(4097), 42]) {
+    for (const pageToken of ['', 'x'.repeat(MAX_PAGE_TOKEN_LENGTH + 1), 42]) {
       expectInvalid(() => parseServiceSearch({
         filter: { interfaces: ['a2a'] },
         pageToken,
       }));
     }
+  });
+
+  it('accepts filter identifiers and raw page tokens at their exact limits', () => {
+    const filterIdentifier = 'x'.repeat(512);
+    const pageToken = 'x'.repeat(MAX_PAGE_TOKEN_LENGTH);
+
+    expect(parseServiceSearch({
+      filter: { capabilityIds: [filterIdentifier] },
+      pageToken,
+    })).toEqual({
+      filter: { capabilityIds: [filterIdentifier] },
+      pageSize: 20,
+      pageToken,
+    });
   });
 
   it('rejects NUL and ill-formed Unicode filter identifiers without repairing them', () => {
@@ -217,6 +233,35 @@ describe('parseServiceReplacement', () => {
     }
   });
 
+  it('accepts every scalar field at its exact maximum length', () => {
+    const urlPrefix = 'https://example.test/';
+    const service = {
+      ...validService,
+      identifier: 'i'.repeat(512),
+      display_name: 'd'.repeat(255),
+      type: 't'.repeat(512),
+      url: `${urlPrefix}${'u'.repeat(2048 - urlPrefix.length)}`,
+      description: 'n'.repeat(1000),
+    };
+
+    expect(parseServiceReplacement({ services: [service] })[0]).toMatchObject({
+      identifier: service.identifier,
+      displayName: service.display_name,
+      type: service.type,
+      url: service.url,
+      description: service.description,
+    });
+  });
+
+  it('accepts 100 distinct service declarations', () => {
+    const services = Array.from({ length: 100 }, (_, index) => ({
+      ...validService,
+      identifier: `service:${index}`,
+    }));
+
+    expect(parseServiceReplacement({ services })).toHaveLength(100);
+  });
+
   it('rejects NUL and ill-formed Unicode replacement fields', () => {
     for (const override of [
       { display_name: 'Weather\u0000service' },
@@ -281,6 +326,31 @@ describe('service discovery cursors', () => {
       .toEqual(after);
   });
 
+  it.each([
+    ['normal values', after],
+    ['valid international and astral text', {
+      identifier: 'service:東京:🌦️',
+      sourceId: 'org:Montréal:🛰️',
+    }],
+    ['an accepted long control-character identifier', {
+      identifier: '\u0001'.repeat(512),
+      sourceId: 'org:test',
+    }],
+    ['both keys at maximum JSON escaping', {
+      identifier: '\u0001'.repeat(512),
+      sourceId: '\u0001'.repeat(512),
+    }],
+  ])('round trips %s through search parsing and cursor decoding', (_label, cursorAfter) => {
+    const token = encodeServiceCursor(normalized, cursorAfter);
+
+    expect(token.length).toBeLessThanOrEqual(MAX_PAGE_TOKEN_LENGTH);
+    expect(parseServiceSearch({
+      filter: normalized,
+      pageToken: token,
+    }).pageToken).toBe(token);
+    expect(decodeServiceCursor(normalized, token)).toEqual(cursorAfter);
+  });
+
   it('rejects a cursor bound to a different filter', () => {
     expectInvalid(() => decodeServiceCursor({ areaServed: ['place:c'] }, expectedToken));
   });
@@ -290,7 +360,7 @@ describe('service discovery cursors', () => {
       '',
       '***',
       `${expectedToken}=`,
-      'x'.repeat(4097),
+      'x'.repeat(MAX_PAGE_TOKEN_LENGTH + 1),
       Buffer.from('not-json').toString('base64url'),
       Buffer.from(JSON.stringify({
         after,
@@ -303,14 +373,21 @@ describe('service discovery cursors', () => {
   });
 
   it('validates every decoded key, type, version, hash, and cursor bound', () => {
+    const validCursor = JSON.parse(
+      Buffer.from(expectedToken, 'base64url').toString('utf8'),
+    ) as {
+      v: number;
+      filterHash: string;
+      after: typeof after;
+    };
     const objects = [
-      { v: 2, filterHash: '0'.repeat(64), after },
-      { v: 1, filterHash: '0'.repeat(63), after },
-      { v: 1, filterHash: '0'.repeat(64), after, extra: true },
-      { v: 1, filterHash: '0'.repeat(64), after: { ...after, extra: true } },
-      { v: 1, filterHash: '0'.repeat(64), after: { ...after, identifier: 42 } },
-      { v: 1, filterHash: '0'.repeat(64), after: { ...after, identifier: 'x'.repeat(513) } },
-      { v: 1, filterHash: '0'.repeat(64), after: { ...after, sourceId: ' org:one' } },
+      { ...validCursor, v: 2 },
+      { ...validCursor, filterHash: validCursor.filterHash.slice(1) },
+      { ...validCursor, extra: true },
+      { ...validCursor, after: { ...validCursor.after, extra: true } },
+      { ...validCursor, after: { ...validCursor.after, identifier: 42 } },
+      { ...validCursor, after: { ...validCursor.after, identifier: 'x'.repeat(513) } },
+      { ...validCursor, after: { ...validCursor.after, sourceId: ' org:one' } },
     ];
 
     for (const object of objects) {

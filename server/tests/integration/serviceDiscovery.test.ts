@@ -287,6 +287,46 @@ describe('POST /api/ard/services/search', () => {
       .toEqual([`${PREFIX}page-b`]);
     expect(second.json().pageToken).toBeNull();
   });
+
+  it('continues after an escaping-heavy identifier through HTTP and PostgreSQL', async () => {
+    const orgId = await seedOrganization('pagination-escaping');
+    await addMembership(orgId, adminUserId, 'admin');
+    const longIdentifier = `${PREFIX}${'\u0001'.repeat(512 - PREFIX.length)}`;
+    const nextIdentifier = `${PREFIX}z-after-escaping`;
+    const boundaryService = {
+      ...declaration(longIdentifier, CHICAGO),
+      display_name: 'Escaping-heavy page boundary',
+    };
+    const replacement = await replaceServices(orgId, adminToken, [
+      boundaryService,
+      declaration(nextIdentifier, CHICAGO),
+    ]);
+    expect(replacement.statusCode).toBe(200);
+
+    const first = await fastify.inject({
+      method: 'POST',
+      url: '/api/ard/services/search',
+      payload: { filter: { areaServed: [CHICAGO] }, pageSize: 1 },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().items.map((item: { identifier: string }) => item.identifier))
+      .toEqual([longIdentifier]);
+    expect(first.json().pageToken.length).toBeGreaterThan(4096);
+
+    const second = await fastify.inject({
+      method: 'POST',
+      url: '/api/ard/services/search',
+      payload: {
+        filter: { areaServed: [CHICAGO] },
+        pageSize: 1,
+        pageToken: first.json().pageToken,
+      },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().items.map((item: { identifier: string }) => item.identifier))
+      .toEqual([nextIdentifier]);
+    expect(second.json().pageToken).toBeNull();
+  });
 });
 
 describe('PUT /api/v1/orgs/:org_id/services', () => {

@@ -23,7 +23,9 @@ const CURSOR_AFTER_KEYS = ['identifier', 'sourceId'] as const;
 
 const MAX_FILTER_VALUES = 20;
 const MAX_IDENTIFIER_LENGTH = 512;
-const MAX_PAGE_TOKEN_LENGTH = 4096;
+// Two 512-character keys at six ASCII bytes per escaped code unit plus 127
+// JSON bytes encode to 8,362 base64url characters; 16 KiB preserves that domain.
+const MAX_PAGE_TOKEN_LENGTH = 16_384;
 
 type PlainObject = Record<string, unknown>;
 
@@ -306,7 +308,11 @@ export function encodeServiceCursor(
 ): string {
   const normalizedFilter = parseFilter(filter);
   const normalizedAfter = parseCursorAfter(after);
-  return serializeCursor(filterHash(normalizedFilter), normalizedAfter);
+  const token = serializeCursor(filterHash(normalizedFilter), normalizedAfter);
+  if (token.length > MAX_PAGE_TOKEN_LENGTH) {
+    return invalid(`encoded pageToken must not exceed ${MAX_PAGE_TOKEN_LENGTH} characters`);
+  }
+  return token;
 }
 
 export function decodeServiceCursor(
