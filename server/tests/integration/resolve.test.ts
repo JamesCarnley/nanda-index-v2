@@ -52,19 +52,28 @@ describe('GET /api/v1/resolve — NANDA Index lookup', () => {
     expect(body.index_record.registry_url).toBe('https://registry.nasiko.com');
   });
 
-  it('resolves by org_id slug when no domain match', async () => {
+  it('resolves by exact domain and does not fall back to an org_id slug', async () => {
     await seedOrg('res-slug', 'slug.example.com', 'https://registry.slug.example.com');
 
-    const locator = encodeURIComponent('urn:ai:res-slug:bot');
-    const res = await fastify.inject({
+    const domainLocator = encodeURIComponent('urn:ai:slug.example.com:bot');
+    const domainRes = await fastify.inject({
       method: 'GET',
-      url: `/api/v1/resolve?locator=${locator}`,
+      url: `/api/v1/resolve?locator=${domainLocator}`,
     });
 
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
+    expect(domainRes.statusCode).toBe(200);
+    const body = domainRes.json();
     expect(body.identifier).toBe('bot');
     expect(body.index_record.org_id).toBe('res-slug');
+
+    const slugLocator = encodeURIComponent('urn:ai:res-slug:bot');
+    const slugRes = await fastify.inject({
+      method: 'GET',
+      url: `/api/v1/resolve?locator=${slugLocator}`,
+    });
+
+    expect(slugRes.statusCode).toBe(404);
+    expect(slugRes.json().error).toBe('not_found');
   });
 
   it('returns 404 when org is not in the index', async () => {

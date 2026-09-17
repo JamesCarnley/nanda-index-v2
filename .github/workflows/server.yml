@@ -1,0 +1,105 @@
+name: Server
+
+on:
+  push:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: nanda_index_ci
+          POSTGRES_USER: nanda_ci
+          POSTGRES_PASSWORD: nanda_ci_server_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nanda_ci -d nanda_index_ci"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://nanda_ci:nanda_ci_server_password@127.0.0.1:5432/nanda_index_ci
+      SMTP_URL: log
+      FEDERATION_MODE: none
+      DB_MAX_CONNECTIONS: '2'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.11.0
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --engine-strict
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Run migrations twice
+        run: |
+          node dist/db/migrate.js
+          node dist/db/migrate.js
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build server image
+        run: docker build --tag nanda-index-server-ci:${{ github.sha }} .
+
+      - name: Smoke test production image
+        run: |
+          docker run --detach \
+            --name nanda-index-server-ci \
+            --network host \
+            --env DATABASE_URL \
+            --env SMTP_URL \
+            --env FEDERATION_MODE \
+            --env DB_MAX_CONNECTIONS \
+            --env JWT_SECRET=nanda-index-ci-jwt-secret-000000000000 \
+            --env COOKIE_SECRET=nanda-index-ci-cookie-secret-0000000000 \
+            nanda-index-server-ci:${{ github.sha }}
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:3001/health >/dev/null; then
+              break
+            fi
+            if ! docker inspect --format '{{.State.Running}}' nanda-index-server-ci | grep -qx true; then
+              docker logs nanda-index-server-ci
+              exit 1
+            fi
+            sleep 2
+          done
+
+          curl --fail --silent --show-error http://127.0.0.1:3001/health >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:3001/api/ard >/dev/null
+
+      - name: Remove CI server container
+        if: always()
+        run: docker rm --force nanda-index-server-ci 2>/dev/null || true

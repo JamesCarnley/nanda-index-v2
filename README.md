@@ -40,7 +40,7 @@ Four registration types:
 
 ## Stack
 
-- **API:** Fastify 5, TypeScript, Node.js 20
+- **API:** Fastify 5, TypeScript, Node.js 24
 - **Database:** PostgreSQL 16, postgres.js v3
 - **Frontend:** Next.js 16, TailwindCSS v4
 - **Auth:** Email/password + Google OAuth + GitHub OAuth, JWT
@@ -62,6 +62,33 @@ docker compose up --build
 | Web UI  | http://localhost:3000 |
 | API     | http://localhost:3001 |
 | DB      | localhost:5433 |
+
+### Server verification
+
+The server supports Node.js 24. Select it explicitly before installing:
+
+```bash
+fnm install 24.11.0
+fnm use 24.11.0
+cd server
+npm ci --engine-strict
+```
+
+With PostgreSQL 16 available and `DATABASE_URL` pointing to a disposable test
+database, run the same checks as server CI:
+
+```bash
+npm run typecheck
+npm run build
+DATABASE_URL="$DATABASE_URL" SMTP_URL=log FEDERATION_MODE=none DB_MAX_CONNECTIONS=2 node dist/db/migrate.js
+DATABASE_URL="$DATABASE_URL" SMTP_URL=log FEDERATION_MODE=none DB_MAX_CONNECTIONS=2 node dist/db/migrate.js
+DATABASE_URL="$DATABASE_URL" SMTP_URL=log FEDERATION_MODE=none DB_MAX_CONNECTIONS=2 npm test
+```
+
+The second migration run verifies idempotence. The test suite requires a real
+database; a missing or unreachable database is a failure. `npm ci` currently
+reports the repository's inherited dependency audit findings; the Node.js 24
+runtime update does not claim to repair or suppress them.
 
 ---
 
