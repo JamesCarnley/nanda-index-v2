@@ -73,6 +73,25 @@ function requireOwnKey(value: PlainObject, key: string, path: string): void {
   }
 }
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      if (index + 1 >= value.length) {
+        return false;
+      }
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xDC00 || next > 0xDFFF) {
+        return false;
+      }
+      index += 1;
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function parseBoundedString(
   value: unknown,
   path: string,
@@ -84,6 +103,12 @@ function parseBoundedString(
   }
   if (value.length < minimum || value.length > options.maxLength) {
     return invalid(`${path} must contain ${minimum}-${options.maxLength} characters`);
+  }
+  if (value.includes('\u0000')) {
+    return invalid(`${path} must not contain NUL`);
+  }
+  if (!isWellFormedUnicode(value)) {
+    return invalid(`${path} must contain well-formed Unicode`);
   }
   if (options.unpadded && value.trim() !== value) {
     return invalid(`${path} must not have surrounding whitespace`);

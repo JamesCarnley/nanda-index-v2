@@ -96,6 +96,19 @@ describe('parseServiceSearch', () => {
       }));
     }
   });
+
+  it('rejects NUL and ill-formed Unicode filter identifiers without repairing them', () => {
+    for (const value of ['capability:\u0000weather', 'capability:\uD800', 'capability:\uDC00']) {
+      expectInvalid(() => parseServiceSearch({ filter: { capabilityIds: [value] } }));
+    }
+  });
+
+  it('preserves valid non-ASCII and astral Unicode filter identifiers exactly', () => {
+    const value = 'capability:東京:🌦️';
+
+    expect(parseServiceSearch({ filter: { capabilityIds: [value] } }).filter)
+      .toEqual({ capabilityIds: [value] });
+  });
 });
 
 describe('parseServiceReplacement', () => {
@@ -202,6 +215,33 @@ describe('parseServiceReplacement', () => {
         services: [{ ...validService, ...override }],
       }));
     }
+  });
+
+  it('rejects NUL and ill-formed Unicode replacement fields', () => {
+    for (const override of [
+      { display_name: 'Weather\u0000service' },
+      { description: 'Broken high surrogate: \uD800' },
+      { description: 'Broken low surrogate: \uDC00' },
+    ]) {
+      expectInvalid(() => parseServiceReplacement({
+        services: [{ ...validService, ...override }],
+      }));
+    }
+  });
+
+  it('preserves valid non-ASCII and astral Unicode replacement fields exactly', () => {
+    const service = {
+      ...validService,
+      identifier: 'service:東京:🌦️',
+      display_name: '東京の天気 🌦️',
+      description: 'Prévisions météo pour 東京 🌦️',
+    };
+
+    expect(parseServiceReplacement({ services: [service] })[0]).toMatchObject({
+      identifier: service.identifier,
+      displayName: service.display_name,
+      description: service.description,
+    });
   });
 
   it('allows empty declaration arrays but validates and bounds their raw values', () => {
