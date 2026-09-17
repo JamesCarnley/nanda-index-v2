@@ -34,6 +34,19 @@ export interface ArdRegistryDescriptor {
       upstreams: Array<{ identifier: string; displayName: string; url: string }>;
     };
   };
+  'x-nanda-index-service-discovery': {
+    version: '0.1';
+    endpoint: { method: 'POST'; url: string };
+    acceptedFields: ['capabilityIds', 'areaServed', 'interfaces'];
+    semantics: {
+      acrossFields: 'AND';
+      withinField: 'OR';
+    };
+    maxPageSize: 100;
+    scope: 'local-projection';
+    upstreamSearch: 'not-attempted';
+    paginationConsistency: 'live-keyset';
+  };
 }
 
 export interface ArdSearchResultItem {

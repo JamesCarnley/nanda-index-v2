@@ -215,6 +215,121 @@ curl -X POST https://api.nandaindex.org/api/v1/orgs \
 
 ---
 
+## Structured Service Discovery
+
+An organization admin can replace that organization's complete set of service
+declarations. The authenticated write endpoint uses NANDA's native snake_case
+wire format. For example, this declares one Chicago weather specialist for an
+existing organization whose admin token is in `TOKEN`:
+
+The organization must already exist, and the token holder must have its admin
+role. Replacement does not activate or verify the organization; declarations
+are returned by public search only while their parent organization is active.
+These examples require a server running this fork with its migrations applied;
+set `INDEX_BASE_URL` if it is not listening on the local default.
+
+```bash
+INDEX_BASE_URL="${INDEX_BASE_URL:-http://127.0.0.1:3001}"
+CITY_ORG_ID="city-weather-cooperative"
+
+curl -X PUT "${INDEX_BASE_URL}/api/v1/orgs/${CITY_ORG_ID}/services" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "services": [{
+      "identifier": "urn:nanda:service:city-weather-cooperative:chicago-advice",
+      "display_name": "Chicago Weather Advice",
+      "type": "application/a2a-agent-card+json",
+      "url": "https://weather.example.com/chicago/.well-known/agent-card.json",
+      "description": "Weather advice for Chicago residents and visitors.",
+      "capability_ids": [
+        "urn:example:nanda-city:capability:weather-advice:v1"
+      ],
+      "area_served": [
+        "https://www.wikidata.org/entity/Q1297"
+      ],
+      "interfaces": [
+        "application/a2a-agent-card+json"
+      ]
+    }]
+  }'
+```
+
+The public search endpoint uses the ARD-adjacent camelCase shape. This compound
+query uses the same capability, Chicago, and interface identifiers as the
+declaration above:
+
+```bash
+curl -X POST "${INDEX_BASE_URL}/api/ard/services/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filter": {
+      "capabilityIds": [
+        "urn:example:nanda-city:capability:weather-advice:v1"
+      ],
+      "areaServed": [
+        "https://www.wikidata.org/entity/Q1297"
+      ],
+      "interfaces": [
+        "application/a2a-agent-card+json"
+      ]
+    },
+    "pageSize": 20
+  }'
+```
+
+Filters are exact and case-sensitive. Present fields are combined with AND;
+multiple values inside one field are combined with OR. Hard filters run before
+the page limit. To continue a result set, send the returned `pageToken` with
+the identical filter. This `jq` example requests the first one-item page and,
+when another page exists, requests the next page:
+
+```bash
+FILTER='{
+  "capabilityIds":["urn:example:nanda-city:capability:weather-advice:v1"],
+  "areaServed":["https://www.wikidata.org/entity/Q1297"],
+  "interfaces":["application/a2a-agent-card+json"]
+}'
+
+FIRST_PAGE="$(curl -sS -X POST "${INDEX_BASE_URL}/api/ard/services/search" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --argjson filter "$FILTER" '{filter:$filter,pageSize:1}')")"
+PAGE_TOKEN="$(printf '%s' "$FIRST_PAGE" | jq -r '.pageToken')"
+
+if [ "$PAGE_TOKEN" != "null" ]; then
+  curl -X POST "${INDEX_BASE_URL}/api/ard/services/search" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n --argjson filter "$FILTER" --arg pageToken "$PAGE_TOKEN" \
+      '{filter:$filter,pageSize:1,pageToken:$pageToken}')"
+fi
+```
+
+Pages use live keyset consistency: each page reads current committed projection
+state, not a frozen multi-page snapshot. Concurrent replacement can change later
+pages, so clients that need a stable collection should restart after mutations
+and freeze the resulting input set in their own evidence bundle.
+
+An empty replacement removes only this organization's declarations:
+
+```bash
+curl -X PUT "${INDEX_BASE_URL}/api/v1/orgs/${CITY_ORG_ID}/services" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"services":[]}'
+```
+
+These records are attributed declarations, not test evidence, endorsement, or
+permission to invoke a service. Capability, area, and interface values belong
+to each service declaration; organization tags are not inherited by its
+services. The `urn:example:` capability above is illustrative and has no
+meaning beyond clients that explicitly adopt that example vocabulary. The
+endpoint searches only the local projection and does not
+automatically federate, crawl or fetch remote registries, read a chain, or add
+reputation scores. `GET /api/ard` advertises this bounded behavior under the
+namespaced `x-nanda-index-service-discovery` extension.
+
+---
+
 ## Schema
 
 ### IndexRecord

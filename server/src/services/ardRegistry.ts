@@ -79,6 +79,22 @@ export function buildDescriptor(config: Config): ArdRegistryDescriptor {
         upstreams,
       },
     },
+    'x-nanda-index-service-discovery': {
+      version: '0.1',
+      endpoint: {
+        method: 'POST',
+        url: `${base}/api/ard/services/search`,
+      },
+      acceptedFields: ['capabilityIds', 'areaServed', 'interfaces'],
+      semantics: {
+        acrossFields: 'AND',
+        withinField: 'OR',
+      },
+      maxPageSize: 100,
+      scope: 'local-projection',
+      upstreamSearch: 'not-attempted',
+      paginationConsistency: 'live-keyset',
+    },
   };
 }
 
