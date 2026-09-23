@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import postgres from 'postgres';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { buildServer } from '../../src/server.js';
 import { closeSql, getSql } from '../../src/db/client.js';
@@ -84,4 +85,48 @@ it.each([
 ])('bounds malformed and unknown direct reads: %s', async (url, status) => {
   const response = await fastify.inject({ method: 'GET', url });
   expect(response.statusCode).toBe(status);
+});
+
+it('never pairs a pre-withdrawal latest observation with post-withdrawal coverage', async () => {
+  const sql = postgres(process.env['DATABASE_URL']!, { max: 1, transform: postgres.camel });
+  const sourceId = identitySourceId(routeSource);
+  let pendingRead: Promise<Awaited<ReturnType<typeof fastify.inject>>> | undefined;
+  try {
+    await sql.begin(async (tx) => {
+      await tx`LOCK TABLE identity_sources IN ACCESS EXCLUSIVE MODE`;
+      pendingRead = Promise.resolve(fastify.inject({ method: 'GET',
+        url: `/api/ard/erc8004/${source.chainId}/${routeRegistry}/7` }));
+      let blocked = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        await tx`SELECT pg_stat_clear_snapshot()`;
+        const [status] = await tx<{ blocked: boolean }[]>`
+          SELECT EXISTS (
+            SELECT 1 FROM pg_stat_activity
+            WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock'
+              AND query LIKE '%identity_sources%'
+          ) AS blocked
+        `;
+        blocked = status!.blocked;
+        if (blocked) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(blocked).toBe(true);
+      await tx`DELETE FROM service_projections WHERE source_id = ${sourceId}`;
+      await tx`DELETE FROM identity_latest WHERE source_id = ${sourceId}`;
+      await tx`
+        UPDATE identity_sources SET state_version = state_version + 1,
+          generation = generation + 1, rebuilding = true,
+          checkpoint_number = NULL, checkpoint_hash = NULL, checkpoint_timestamp = NULL
+        WHERE source_id = ${sourceId}
+      `;
+    });
+  } finally {
+    await sql.end();
+  }
+  const response = await pendingRead!;
+  if (response.statusCode === 200) {
+    expect(response.json().coverage).toMatchObject({ stateVersion: '1', checkpoint: routeObservation.block });
+  } else {
+    expect(response.statusCode).toBe(404);
+  }
 });

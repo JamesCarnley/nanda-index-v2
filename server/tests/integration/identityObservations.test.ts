@@ -170,10 +170,10 @@ it('keeps an organization declaration separate from an identical chain subject',
     ]);
     expect(same[0]!.provenance.authority).toMatchObject({ kind: 'erc8004-identity' });
     expect(same[1]!.provenance.authority).toBeUndefined();
-    const first = await searchServiceProjections({ filter: {
-      areaServed: ['https://www.wikidata.org/entity/Q1297'] }, pageSize: 1 });
-    const second = await searchServiceProjections({ filter: {
-      areaServed: ['https://www.wikidata.org/entity/Q1297'] }, pageSize: 1,
+    const paginationFilter = { areaServed: ['https://www.wikidata.org/entity/Q1297'],
+      capabilityIds: ['urn:nandacity:capability:evening-plan:0.1'] };
+    const first = await searchServiceProjections({ filter: paginationFilter, pageSize: 1 });
+    const second = await searchServiceProjections({ filter: paginationFilter, pageSize: 1,
       pageToken: first.pageToken! });
     expect(first.items[0]!.provenance.sourceKind).toBe('erc8004-identity');
     expect(second.items[0]!.provenance.sourceKind).toBe('organization-declaration');
@@ -216,6 +216,28 @@ it('reports distinct configured observer origins for the same persisted source',
     if (previous === undefined) delete process.env['API_BASE_URL'];
     else process.env['API_BASE_URL'] = previous;
   }
+});
+
+it('keeps coverage decimal fields exact above Number.MAX_SAFE_INTEGER in generic search', async () => {
+  await applyIdentityBatch(batch());
+  const sql = getSql();
+  const sourceId = identitySourceId(source);
+  await sql`
+    UPDATE identity_sources SET
+      state_version = ${'9007199254740993'},
+      checkpoint_number = ${'9007199254740993'},
+      head_number = ${'9007199254740995'},
+      finalized_number = ${'9007199254740993'},
+      finalized_hash = ${block.hash}, finalized_timestamp = ${block.timestamp}
+    WHERE source_id = ${sourceId}
+  `;
+  const direct = await readIdentityCoverage(source);
+  const search = await searchServiceProjections({
+    filter: { areaServed: ['https://www.wikidata.org/entity/Q1297'] }, pageSize: 20,
+  });
+  const fromSearch = search.coverage.identitySources.find((item) => item.sourceId === sourceId);
+  expect(direct.stateVersion).toBe('9007199254740993');
+  expect(fromSearch).toEqual(direct);
 });
 
 describe('atomic identity observation batch', () => {

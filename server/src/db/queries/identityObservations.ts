@@ -230,6 +230,26 @@ export async function readLatestIdentityRecord(input: AgentRef): Promise<{
   return row ? { observationId: row.observationId,
     observation: JSON.parse(row.observationJson) as IdentityObservation } : null;
 }
+/** Latest observation and coverage share one PostgreSQL statement snapshot. */
+export async function readLatestIdentityWithCoverage(input: AgentRef): Promise<{
+  observationId: string; observation: IdentityObservation; coverage: IdentityCoverage;
+} | null> {
+  const agent = validateAgent(input);
+  const sourceId = `erc8004-identity:${agent.chainId}:${agent.registry}`;
+  const [row] = await getSql()<(SourceRow & { observationId: string | null; observationJson: string | null })[]>`
+    SELECT s.*, o.observation_id, o.observation_json
+    FROM identity_sources s
+    LEFT JOIN identity_latest l ON l.source_id = s.source_id AND l.agent_id = ${agent.agentId}
+    LEFT JOIN identity_observations o
+      ON o.source_id = l.source_id AND o.observation_id = l.observation_id
+    WHERE s.source_id = ${sourceId}
+  `;
+  return row?.observationId && row.observationJson
+    ? { observationId: row.observationId,
+      observation: JSON.parse(row.observationJson) as IdentityObservation,
+      coverage: sourceRowCoverage(row) }
+    : null;
+}
 export async function readIdentityObservation(id: string): Promise<IdentityObservation | null> {
   return (await readIdentityObservationRecord(id))?.observation ?? null;
 }

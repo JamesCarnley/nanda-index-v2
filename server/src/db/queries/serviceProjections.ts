@@ -221,7 +221,18 @@ export async function searchServiceProjections(
     LIMIT ${query.pageSize + 1}
     ), coverage AS (
       SELECT COALESCE(json_agg(row_to_json(s) ORDER BY s.source_id), '[]'::json) AS identity_sources
-      FROM identity_sources s
+      FROM (
+        SELECT source_id, source_fingerprint, confirmations,
+          state_version::text AS state_version, generation::text AS generation,
+          availability, rebuilding,
+          checkpoint_number::text AS checkpoint_number, checkpoint_hash,
+          checkpoint_timestamp::text AS checkpoint_timestamp,
+          head_number::text AS head_number, head_hash, head_timestamp::text AS head_timestamp,
+          finalized_number::text AS finalized_number, finalized_hash,
+          finalized_timestamp::text AS finalized_timestamp,
+          last_success_at, last_attempt_at
+        FROM identity_sources
+      ) s
     )
     SELECT page.*, coverage.identity_sources, CURRENT_TIMESTAMP AS read_at
     FROM coverage LEFT JOIN page ON true

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
-  readIdentityCoverageById, readIdentityObservationRecord, readLatestIdentityRecord,
+  readIdentityObservationRecord, readLatestIdentityWithCoverage,
 } from '../db/queries/identityObservations.js';
 import { parseObservationId, validateAgent } from '../connectors/erc8004/validation.js';
 
@@ -20,12 +20,9 @@ export async function registerIdentityObservationRoutes(fastify: FastifyInstance
         if (!/^[1-9][0-9]{0,15}$/.test(chainId) || agentId.length > 78) return invalid(reply);
         agent = validateAgent({ chainId: Number(chainId), registry, agentId });
       } catch { return invalid(reply); }
-      const sourceId = `erc8004-identity:${agent.chainId}:${agent.registry}`;
-      const [record, coverage] = await Promise.all([
-        readLatestIdentityRecord(agent), readIdentityCoverageById(sourceId),
-      ]);
-      if (!record || !coverage) return reply.code(404).send({ error: 'NOT_FOUND' });
-      return reply.code(200).send({ ...record, coverage });
+      const record = await readLatestIdentityWithCoverage(agent);
+      if (!record) return reply.code(404).send({ error: 'NOT_FOUND' });
+      return reply.code(200).send(record);
     },
   );
 
