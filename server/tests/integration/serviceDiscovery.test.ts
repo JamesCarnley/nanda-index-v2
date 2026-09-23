@@ -250,6 +250,7 @@ describe('POST /api/ard/services/search', () => {
       upstreamSearch: 'not-attempted',
       paginationConsistency: 'live-keyset',
       readAt: expect.any(String),
+      identitySources: expect.any(Array),
     });
     expect(fetchTrap).not.toHaveBeenCalled();
   });
@@ -266,7 +267,7 @@ describe('POST /api/ard/services/search', () => {
     const first = await fastify.inject({
       method: 'POST',
       url: '/api/ard/services/search',
-      payload: { filter: { areaServed: [CHICAGO] }, pageSize: 1 },
+      payload: { filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY] }, pageSize: 1 },
     });
     expect(first.statusCode).toBe(200);
     expect(first.json().items.map((item: { identifier: string }) => item.identifier))
@@ -277,7 +278,7 @@ describe('POST /api/ard/services/search', () => {
       method: 'POST',
       url: '/api/ard/services/search',
       payload: {
-        filter: { areaServed: [CHICAGO] },
+        filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY] },
         pageSize: 1,
         pageToken: first.json().pageToken,
       },
@@ -306,7 +307,7 @@ describe('POST /api/ard/services/search', () => {
     const first = await fastify.inject({
       method: 'POST',
       url: '/api/ard/services/search',
-      payload: { filter: { areaServed: [CHICAGO] }, pageSize: 1 },
+      payload: { filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY] }, pageSize: 1 },
     });
     expect(first.statusCode).toBe(200);
     expect(first.json().items.map((item: { identifier: string }) => item.identifier))
@@ -317,7 +318,7 @@ describe('POST /api/ard/services/search', () => {
       method: 'POST',
       url: '/api/ard/services/search',
       payload: {
-        filter: { areaServed: [CHICAGO] },
+        filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY] },
         pageSize: 1,
         pageToken: first.json().pageToken,
       },
@@ -391,7 +392,7 @@ describe('PUT /api/v1/orgs/:org_id/services', () => {
     const search = await fastify.inject({
       method: 'POST',
       url: '/api/ard/services/search',
-      payload: { filter: { areaServed: [CHICAGO] } },
+      payload: { filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY] } },
     });
     expect(search.statusCode).toBe(200);
     expect(search.json().items).toHaveLength(1);
@@ -408,7 +409,7 @@ describe('GET /api/ard descriptor', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()['x-nanda-index-service-discovery']).toEqual({
-      version: '0.1',
+      version: '0.2',
       endpoint: {
         method: 'POST',
         url: expect.stringMatching(/\/api\/ard\/services\/search$/),
@@ -422,6 +423,11 @@ describe('GET /api/ard descriptor', () => {
       scope: 'local-projection',
       upstreamSearch: 'not-attempted',
       paginationConsistency: 'live-keyset',
+      provenance: { observerOrigin: 'configured-api-base-url', authority: 'erc8004-identity' },
+      directReads: {
+        latest: expect.stringMatching(/\/api\/ard\/erc8004\/\{chainId\}/),
+        observation: expect.stringMatching(/\/api\/ard\/identity-observations\/\{observationId\}/),
+      },
     });
   });
 });

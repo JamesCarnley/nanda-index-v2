@@ -329,6 +329,35 @@ automatically federate, crawl or fetch remote registries, read a chain, or add
 reputation scores. `GET /api/ard` advertises this bounded behavior under the
 namespaced `x-nanda-index-service-discovery` extension.
 
+The `0.2` extension adds a separate, optional ERC-8004 observation store. A
+search response includes `observerOrigin` (this Index's configured
+`API_BASE_URL`) and `coverage.identitySources`, including persisted source
+status even when no chain service matches the filter. A chain projection has
+`provenance.authority` with its qualified agent, observed block and immutable
+`observationId`; an organization declaration has no chain authority field.
+The observation ID is a SHA-256 integrity reference over fixed-order source
+configuration and observation JSON, **not** an owner signature, a live-chain
+proof, an endorsement, or a service-quality score. The source's `stateVersion`
+is a monotonic write token, including after rebuild; `availability`,
+`progress`, `checkpoint`, `observedHead`, `finalizedBlock` and timestamps must
+be evaluated separately. A current checkpoint can coexist with an old but
+unchanged profile. Search pages and coverage come from one PostgreSQL statement
+snapshot, while pagination across requests remains live-keyset.
+
+Two public read-only endpoints are available:
+
+- `GET /api/ard/erc8004/{chainId}/{registry}/{agentId}` returns the latest
+  observation (including an ineligible one), its ID, and source coverage.
+- `GET /api/ard/identity-observations/{observationId}` returns retained
+  observation JSON and its exact stored serialized bytes, even after source
+  withdrawal. Malformed IDs return `400`; absent records return `404`.
+
+There is no public connector writer. This increment supplies storage and wire
+provenance only; it does not start an ERC-8004 follower, validate a remote
+AgentCard, establish a chain-backed owner at read time, or change ordinary
+organization publishing and generic search. Clients must independently choose
+their own chain access and verify any candidate they rely on.
+
 ---
 
 ## Schema

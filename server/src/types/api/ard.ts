@@ -35,7 +35,7 @@ export interface ArdRegistryDescriptor {
     };
   };
   'x-nanda-index-service-discovery': {
-    version: '0.1';
+    version: '0.2';
     endpoint: { method: 'POST'; url: string };
     acceptedFields: ['capabilityIds', 'areaServed', 'interfaces'];
     semantics: {
@@ -46,6 +46,11 @@ export interface ArdRegistryDescriptor {
     scope: 'local-projection';
     upstreamSearch: 'not-attempted';
     paginationConsistency: 'live-keyset';
+    provenance: {
+      observerOrigin: 'configured-api-base-url';
+      authority: 'erc8004-identity';
+    };
+    directReads: { latest: string; observation: string };
   };
 }
 

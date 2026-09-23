@@ -80,7 +80,7 @@ export function buildDescriptor(config: Config): ArdRegistryDescriptor {
       },
     },
     'x-nanda-index-service-discovery': {
-      version: '0.1',
+      version: '0.2',
       endpoint: {
         method: 'POST',
         url: `${base}/api/ard/services/search`,
@@ -94,6 +94,11 @@ export function buildDescriptor(config: Config): ArdRegistryDescriptor {
       scope: 'local-projection',
       upstreamSearch: 'not-attempted',
       paginationConsistency: 'live-keyset',
+      provenance: { observerOrigin: 'configured-api-base-url', authority: 'erc8004-identity' },
+      directReads: {
+        latest: `${base}/api/ard/erc8004/{chainId}/{registry}/{agentId}`,
+        observation: `${base}/api/ard/identity-observations/{observationId}`,
+      },
     },
   };
 }

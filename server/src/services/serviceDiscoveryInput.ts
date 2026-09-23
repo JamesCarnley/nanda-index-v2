@@ -270,6 +270,18 @@ export function parseServiceReplacement(raw: unknown): ServiceDeclaration[] {
   return services;
 }
 
+/** Reuses the organization declaration bounds for a connector-supplied typed declaration. */
+export function validateServiceDeclaration(raw: unknown): ServiceDeclaration {
+  const value = parsePlainObject(raw, 'declaration');
+  requireAllowedKeys(value, ['identifier', 'displayName', 'type', 'url', 'description',
+    'capabilityIds', 'areaServed', 'interfaces'], 'declaration');
+  return parseServiceReplacement({ services: [{
+    identifier: value.identifier, display_name: value.displayName, type: value.type,
+    url: value.url, description: value.description, capability_ids: value.capabilityIds,
+    area_served: value.areaServed, interfaces: value.interfaces,
+  }] })[0]!;
+}
+
 function parseCursorAfter(raw: unknown): { identifier: string; sourceId: string } {
   const value = parsePlainObject(raw, 'cursor.after');
   requireAllowedKeys(value, CURSOR_AFTER_KEYS, 'cursor.after');

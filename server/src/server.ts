@@ -20,6 +20,7 @@ import { registerAgenticSearchRoutes } from './routes/agentic-search.js';
 import { registerArdRoutes } from './routes/ard.js';
 import { registerResolveRoute } from './routes/resolve.js';
 import { registerServiceDiscoveryRoutes } from './routes/service-discovery.js';
+import { registerIdentityObservationRoutes } from './routes/identity-observations.js';
 
 export interface BuildServerOptions {
   logger?: boolean;
@@ -33,6 +34,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   const config = buildConfig();
 
   const fastify = Fastify({
+    routerOptions: { maxParamLength: 1024 }, // Bounded direct-read handlers return 400.
     logger:
       options.logger === false
         ? false
@@ -63,6 +65,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await registerAgenticSearchRoutes(fastify);
   await registerArdRoutes(fastify);
   await registerServiceDiscoveryRoutes(fastify);
+  await registerIdentityObservationRoutes(fastify);
   await registerResolveRoute(fastify);
 
   return { fastify, config };

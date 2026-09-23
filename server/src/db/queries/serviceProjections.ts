@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '../client.js';
+import { buildConfig } from '../../config/index.js';
+import { sourceRowCoverage } from './identityObservations.js';
+import type { IdentityObservation } from '../../connectors/erc8004/types.js';
 import {
   decodeServiceCursor,
   encodeServiceCursor,
@@ -28,6 +31,10 @@ interface ServiceProjectionRow {
   interfaces: string[];
   sourceRevision: string;
   observedAt: Date;
+  observationId: string | null;
+  observationJson: string | null;
+  identitySources: Array<Record<string, unknown>>;
+  readAt: Date;
 }
 
 function compareOrdinal(left: string, right: string): number {
@@ -55,7 +62,7 @@ function contentRevision(services: ServiceDeclaration[]): string {
 }
 
 function toProjection(row: ServiceProjectionRow): ServiceProjection {
-  return {
+  const projection: ServiceProjection = {
     identifier: row.identifier,
     displayName: row.displayName,
     type: row.mediaType,
@@ -72,6 +79,12 @@ function toProjection(row: ServiceProjectionRow): ServiceProjection {
       observedAt: row.observedAt.toISOString(),
     },
   };
+  if (row.sourceKind === 'erc8004-identity') {
+    const observation = JSON.parse(row.observationJson!) as IdentityObservation;
+    projection.provenance.authority = { kind: 'erc8004-identity', agent: observation.agent,
+      block: observation.block, observationId: row.observationId! };
+  }
+  return projection;
 }
 
 export async function replaceOrganizationServices(
@@ -119,7 +132,8 @@ export async function replaceOrganizationServices(
 
     await tx`
       DELETE FROM service_projections
-      WHERE source_id = ${sourceId}
+      WHERE source_kind = ${ORGANIZATION_SOURCE_KIND}
+        AND org_id = ${orgId} AND source_id = ${sourceId}
     `;
 
     for (const service of services) {
@@ -177,6 +191,7 @@ export async function searchServiceProjections(
     : sql``;
 
   const rows = await sql<ServiceProjectionRow[]>`
+    WITH page AS (
     SELECT
       p.source_id,
       p.identifier,
@@ -190,9 +205,13 @@ export async function searchServiceProjections(
       p.area_served,
       p.interfaces,
       p.source_revision,
-      p.observed_at
+      p.observed_at,
+      p.observation_id,
+      io.observation_json
     FROM service_projections p
     LEFT JOIN organizations o ON o.org_id = p.org_id
+    LEFT JOIN identity_observations io
+      ON io.source_id = p.source_id AND io.observation_id = p.observation_id
     WHERE (p.org_id IS NULL OR o.status = 'active')
       ${capabilityClause}
       ${areaClause}
@@ -200,14 +219,33 @@ export async function searchServiceProjections(
       ${cursorClause}
     ORDER BY p.identifier COLLATE "C" ASC, p.source_id COLLATE "C" ASC
     LIMIT ${query.pageSize + 1}
+    ), coverage AS (
+      SELECT COALESCE(json_agg(row_to_json(s) ORDER BY s.source_id), '[]'::json) AS identity_sources
+      FROM identity_sources s
+    )
+    SELECT page.*, coverage.identity_sources, CURRENT_TIMESTAMP AS read_at
+    FROM coverage LEFT JOIN page ON true
+    ORDER BY page.identifier COLLATE "C" ASC, page.source_id COLLATE "C" ASC
   `;
 
-  const hasMore = rows.length > query.pageSize;
-  const page = hasMore ? rows.slice(0, query.pageSize) : rows;
+  const items = rows.filter((row) => row.sourceId !== null);
+  const hasMore = items.length > query.pageSize;
+  const page = hasMore ? items.slice(0, query.pageSize) : items;
   const last = page[page.length - 1];
+  const sourceRows = rows[0]?.identitySources ?? [];
+  const identitySources = sourceRows.map((raw) => {
+    const normalized = Object.fromEntries(Object.entries(raw).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()), value,
+    ]));
+    for (const key of ['lastSuccessAt', 'lastAttemptAt']) {
+      if (normalized[key]) normalized[key] = new Date(normalized[key] as string);
+    }
+    return sourceRowCoverage(normalized as unknown as Parameters<typeof sourceRowCoverage>[0]);
+  });
 
   return {
     items: page.map(toProjection),
+    observerOrigin: buildConfig().apiBaseUrl.replace(/\/+$/, ''),
     pageToken: hasMore && last
       ? encodeServiceCursor(query.filter, {
           identifier: last.identifier,
@@ -218,7 +256,8 @@ export async function searchServiceProjections(
       scope: 'local-projection',
       upstreamSearch: 'not-attempted',
       paginationConsistency: 'live-keyset',
-      readAt: new Date().toISOString(),
+      readAt: (rows[0]?.readAt ?? new Date()).toISOString(),
+      identitySources,
     },
   };
 }

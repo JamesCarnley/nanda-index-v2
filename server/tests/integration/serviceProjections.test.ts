@@ -137,16 +137,17 @@ async function seedThreeCityOrganizations(): Promise<{
 
 async function seedIrrelevantRows(count: number): Promise<void> {
   const sql = getSql();
+  const orgId = await seedOrganization('noise');
   await sql`
     INSERT INTO service_projections
       (source_id, identifier, source_kind, org_id, display_name, media_type,
        url, description, capability_ids, area_served, interfaces,
        source_revision, observed_at)
     SELECT
-      ${`${PREFIX}noise-source`},
+      ${`org:${orgId}`},
       ${`${PREFIX}noise-`} || LPAD(series::text, 3, '0'),
-      'internal-test-connector',
-      NULL,
+      'organization-declaration',
+      ${orgId},
       'Irrelevant service ' || series::text,
       'application/agent-card+json',
       'https://noise.example.test/' || series::text,
@@ -357,41 +358,30 @@ describe('service projection storage and replacement', () => {
     const identifier = `${PREFIX}shared-subject`;
     await replaceOrganizationServices(orgId, adminUserId, [service(identifier, [CHICAGO])]);
 
-    const sql = getSql();
-    await sql`
-      INSERT INTO service_projections
-        (source_id, identifier, source_kind, org_id, display_name, media_type,
-         url, description, capability_ids, area_served, interfaces,
-         source_revision, observed_at)
-      VALUES (
-        ${`${PREFIX}connector`}, ${identifier}, 'internal-test-connector', NULL,
-        'Connector view', 'application/agent-card+json',
-        'https://connector.example.test/shared', NULL,
-        ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([CHICAGO])},
-        ${sql.array([INTERFACE_A2A])}, 'connector-revision', CURRENT_TIMESTAMP
-      )
-    `;
+    const secondOrgId = await seedOrganization('second-source');
+    await addMembership(secondOrgId, adminUserId, 'admin');
+    await replaceOrganizationServices(secondOrgId, adminUserId, [service(identifier, [CHICAGO])]);
 
     const before = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA] },
       pageSize: 10,
     });
     expect(before.items.map((item) => item.provenance.sourceId)).toEqual([
       `org:${orgId}`,
-      `${PREFIX}connector`,
+      `org:${secondOrgId}`,
     ]);
 
     const cleared = await replaceOrganizationServices(orgId, adminUserId, []);
     expect(cleared.serviceCount).toBe(0);
     const after = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA] },
       pageSize: 10,
     });
     expect(after.items).toHaveLength(1);
     expect(after.items[0]!.provenance).toMatchObject({
-      sourceId: `${PREFIX}connector`,
-      sourceKind: 'internal-test-connector',
-      organizationId: null,
+      sourceId: `org:${secondOrgId}`,
+      sourceKind: 'organization-declaration',
+      organizationId: secondOrgId,
     });
   });
 });
@@ -402,7 +392,7 @@ describe('service projection search', () => {
     await seedIrrelevantRows(101);
 
     const chicago = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA, CAPABILITY_BETA] },
       pageSize: 100,
     });
     expect(chicago.items.map((item) => item.identifier)).toEqual([
@@ -416,10 +406,11 @@ describe('service projection search', () => {
       upstreamSearch: 'not-attempted',
       paginationConsistency: 'live-keyset',
       readAt: expect.any(String),
+      identitySources: expect.any(Array),
     });
 
     const eitherCity = await searchServiceProjections({
-      filter: { areaServed: [BOSTON, CHICAGO] },
+      filter: { areaServed: [BOSTON, CHICAGO], capabilityIds: [CAPABILITY_ALPHA, CAPABILITY_BETA] },
       pageSize: 100,
     });
     expect(eitherCity.items.map((item) => item.identifier)).toEqual(expectedCityIdentifiers);
@@ -462,7 +453,7 @@ describe('service projection search', () => {
     ]);
 
     const response = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA] },
       pageSize: 20,
     });
 
@@ -471,24 +462,26 @@ describe('service projection search', () => {
 
   it('concatenates unchanged keyset pages without duplicates or omissions in C order', async () => {
     const sql = getSql();
+    const orgA = await seedOrganization('page-source-a');
+    const orgB = await seedOrganization('page-source-b');
     const identifierA = `${PREFIX}page-a`;
     const identifierZ = `${PREFIX}page-z`;
     const identifierUnicode = `${PREFIX}page-ä`;
     await sql`
       INSERT INTO service_projections
-        (source_id, identifier, source_kind, display_name, media_type, url,
+        (source_id, identifier, source_kind, org_id, display_name, media_type, url,
          capability_ids, area_served, interfaces, source_revision)
       VALUES
-        (${`${PREFIX}page-source-b`}, ${identifierA}, 'internal-test-connector',
+        (${`org:${orgB}`}, ${identifierA}, 'organization-declaration', ${orgB},
          'A from B', 'application/agent-card+json', 'https://page.example.test/a-b',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'page-revision'),
-        (${`${PREFIX}page-source-a`}, ${identifierA}, 'internal-test-connector',
+        (${`org:${orgA}`}, ${identifierA}, 'organization-declaration', ${orgA},
          'A from A', 'application/agent-card+json', 'https://page.example.test/a-a',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'page-revision'),
-        (${`${PREFIX}page-source-a`}, ${identifierZ}, 'internal-test-connector',
+        (${`org:${orgA}`}, ${identifierZ}, 'organization-declaration', ${orgA},
          'Z', 'application/agent-card+json', 'https://page.example.test/z',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'page-revision'),
-        (${`${PREFIX}page-source-a`}, ${identifierUnicode}, 'internal-test-connector',
+        (${`org:${orgA}`}, ${identifierUnicode}, 'organization-declaration', ${orgA},
          'Unicode', 'application/agent-card+json', 'https://page.example.test/unicode',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'page-revision')
     `;
@@ -508,25 +501,26 @@ describe('service projection search', () => {
     } while (pageToken !== undefined);
 
     expect(seen).toEqual([
-      `${identifierA}|${PREFIX}page-source-a`,
-      `${identifierA}|${PREFIX}page-source-b`,
-      `${identifierZ}|${PREFIX}page-source-a`,
-      `${identifierUnicode}|${PREFIX}page-source-a`,
+      `${identifierA}|org:${orgA}`,
+      `${identifierA}|org:${orgB}`,
+      `${identifierZ}|org:${orgA}`,
+      `${identifierUnicode}|org:${orgA}`,
     ]);
     expect(new Set(seen).size).toBe(seen.length);
   });
 
   it('rejects a cursor bound to a different normalized filter', async () => {
     const sql = getSql();
+    const orgId = await seedOrganization('cursor-source');
     await sql`
       INSERT INTO service_projections
-        (source_id, identifier, source_kind, display_name, media_type, url,
+        (source_id, identifier, source_kind, org_id, display_name, media_type, url,
          capability_ids, area_served, interfaces, source_revision)
       VALUES
-        (${`${PREFIX}cursor-source`}, ${`${PREFIX}cursor-a`}, 'internal-test-connector',
+        (${`org:${orgId}`}, ${`${PREFIX}cursor-a`}, 'organization-declaration', ${orgId},
          'Cursor A', 'application/agent-card+json', 'https://cursor.example.test/a',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'cursor-revision'),
-        (${`${PREFIX}cursor-source`}, ${`${PREFIX}cursor-b`}, 'internal-test-connector',
+        (${`org:${orgId}`}, ${`${PREFIX}cursor-b`}, 'organization-declaration', ${orgId},
          'Cursor B', 'application/agent-card+json', 'https://cursor.example.test/b',
          ${sql.array([CAPABILITY_ALPHA])}, ${sql.array([])}, ${sql.array([])}, 'cursor-revision')
     `;
@@ -549,20 +543,21 @@ describe('service projection search', () => {
     }
   });
 
-  it('excludes inactive parents and loses deleted organization rows while retaining parentless sources', async () => {
+  it('excludes inactive parents and loses deleted organization rows while retaining other active sources', async () => {
     const orgId = await seedOrganization('lifecycle');
     await addMembership(orgId, adminUserId, 'admin');
     await replaceOrganizationServices(orgId, adminUserId, [
       service(`${PREFIX}lifecycle-org`, [CHICAGO]),
     ]);
     const sql = getSql();
+    const otherOrgId = await seedOrganization('lifecycle-other');
     await sql`
       INSERT INTO service_projections
-        (source_id, identifier, source_kind, display_name, media_type, url,
+        (source_id, identifier, source_kind, org_id, display_name, media_type, url,
          capability_ids, area_served, interfaces, source_revision)
       VALUES (
-        ${`${PREFIX}lifecycle-connector`}, ${`${PREFIX}lifecycle-parentless`},
-        'internal-test-connector', 'Parentless connector', 'application/agent-card+json',
+        ${`org:${otherOrgId}`}, ${`${PREFIX}lifecycle-other`},
+        'organization-declaration', ${otherOrgId}, 'Other organization', 'application/agent-card+json',
         'https://lifecycle.example.test/parentless', ${sql.array([CAPABILITY_ALPHA])},
         ${sql.array([CHICAGO])}, ${sql.array([INTERFACE_A2A])}, 'lifecycle-revision'
       )
@@ -570,20 +565,20 @@ describe('service projection search', () => {
 
     await sql`UPDATE organizations SET status = 'suspended' WHERE org_id = ${orgId}`;
     const suspended = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA] },
       pageSize: 20,
     });
     expect(suspended.items.map((item) => item.identifier)).toEqual([
-      `${PREFIX}lifecycle-parentless`,
+      `${PREFIX}lifecycle-other`,
     ]);
 
     await sql`DELETE FROM organizations WHERE org_id = ${orgId}`;
     const deleted = await searchServiceProjections({
-      filter: { areaServed: [CHICAGO] },
+      filter: { areaServed: [CHICAGO], capabilityIds: [CAPABILITY_ALPHA] },
       pageSize: 20,
     });
     expect(deleted.items.map((item) => item.identifier)).toEqual([
-      `${PREFIX}lifecycle-parentless`,
+      `${PREFIX}lifecycle-other`,
     ]);
     const [count] = await sql<{ count: string }[]>`
       SELECT COUNT(*)::text AS count

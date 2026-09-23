@@ -1,3 +1,5 @@
+import type { AgentRef, BlockRef, IdentityCoverage } from '../../connectors/erc8004/types.js';
+
 export interface ServiceFilter {
   capabilityIds?: string[];
   areaServed?: string[];
@@ -28,16 +30,21 @@ export interface ServiceProjection extends ServiceDeclaration {
     organizationId: string | null;
     revision: string;
     observedAt: string;
+    authority?: {
+      kind: 'erc8004-identity'; agent: AgentRef; block: BlockRef; observationId: string;
+    };
   };
 }
 
 export interface ServiceSearchResponse {
   items: ServiceProjection[];
   pageToken: string | null;
+  observerOrigin: string;
   coverage: {
     scope: 'local-projection';
     upstreamSearch: 'not-attempted';
     paginationConsistency: 'live-keyset';
     readAt: string;
+    identitySources: IdentityCoverage[];
   };
 }
