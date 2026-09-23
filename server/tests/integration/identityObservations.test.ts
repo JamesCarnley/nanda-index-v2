@@ -8,7 +8,7 @@ import {
 import { identityObservationId, identitySourceId } from '../../src/connectors/erc8004/validation.js';
 import { replaceOrganizationServices } from '../../src/db/queries/serviceProjections.js';
 import { searchServiceProjections } from '../../src/db/queries/serviceProjections.js';
-import { batch, block, observation, source } from './identityFixture.js';
+import { batch, block, cityRegistration, observation, source } from './identityFixture.js';
 
 async function cleanup() {
   const sql = getSql();
@@ -149,6 +149,23 @@ it('retains last basis during outage and refreshes lag/catch-up without rewritin
 it('keeps an organization declaration separate from an identical chain subject', async () => {
   const sql = getSql();
   const orgId = 'city-task1-org';
+  const otherRegistry = '0x4444444444444444444444444444444444444444' as const;
+  const otherSource = { ...source, registry: otherRegistry };
+  const otherSourceId = identitySourceId(otherSource);
+  const otherUri = `data:application/json;base64,${Buffer.from(JSON.stringify({
+    ...cityRegistration,
+    registrations: [{ agentId: 7, agentRegistry: `eip155:${source.chainId}:${otherRegistry}` }],
+  })).toString('base64')}`;
+  const unrelatedCityObservation = { ...observation,
+    agent: { ...observation.agent, registry: otherRegistry },
+    agentURI: otherUri, agentUriDigest: keccak256(stringToBytes(otherUri)),
+    agentUriByteLength: Buffer.byteLength(otherUri),
+    declaration: { ...observation.declaration!,
+      identifier: `eip155:${source.chainId}/erc721:${otherRegistry}/7` },
+  };
+  const namespaceCapability = 'urn:nanda-index:test:identity-namespace-collision';
+  const namespaceDeclaration = { ...observation.declaration!,
+    capabilityIds: [...observation.declaration!.capabilityIds, namespaceCapability] };
   await sql`DELETE FROM organizations WHERE org_id = ${orgId}`;
   await sql`DELETE FROM users WHERE provider_id = 'city-task1-user'`;
   const [user] = await sql<{ id: string }[]>`
@@ -160,18 +177,23 @@ it('keeps an organization declaration separate from an identical chain subject',
     VALUES (${orgId}, 'City fixture', 'city-task1.example.test', 'city-task1@example.test', true, 'active')`;
   await sql`INSERT INTO org_memberships (user_id, org_id, role) VALUES (${userId}, ${orgId}, 'admin')`;
   try {
-    await replaceOrganizationServices(orgId, userId, [observation.declaration!]);
-    await applyIdentityBatch(batch());
+    await replaceOrganizationServices(orgId, userId, [namespaceDeclaration]);
+    await applyIdentityBatch(batch({ observations: [
+      { ...observation, declaration: namespaceDeclaration },
+    ] }));
+    await applyIdentityBatch(batch({ source: otherSource, observations: [unrelatedCityObservation] }));
     const result = await searchServiceProjections({ filter: {
       areaServed: ['https://www.wikidata.org/entity/Q1297'] }, pageSize: 20 });
     const same = result.items.filter((item) => item.identifier === observation.declaration!.identifier);
+    expect(result.items.some((item) => item.identifier === unrelatedCityObservation.declaration.identifier))
+      .toBe(true);
     expect(same.map((item) => item.provenance.sourceKind)).toEqual([
       'erc8004-identity', 'organization-declaration',
     ]);
     expect(same[0]!.provenance.authority).toMatchObject({ kind: 'erc8004-identity' });
     expect(same[1]!.provenance.authority).toBeUndefined();
     const paginationFilter = { areaServed: ['https://www.wikidata.org/entity/Q1297'],
-      capabilityIds: ['urn:nandacity:capability:evening-plan:0.1'] };
+      capabilityIds: [namespaceCapability] };
     const first = await searchServiceProjections({ filter: paginationFilter, pageSize: 1 });
     const second = await searchServiceProjections({ filter: paginationFilter, pageSize: 1,
       pageToken: first.pageToken! });
@@ -183,6 +205,10 @@ it('keeps an organization declaration separate from an identical chain subject',
       pageSize: 20 })).items.filter((item) => item.identifier === observation.declaration!.identifier))
       .toHaveLength(1);
   } finally {
+    await sql`DELETE FROM service_projections WHERE source_id = ${otherSourceId}`;
+    await sql`DELETE FROM identity_latest WHERE source_id = ${otherSourceId}`;
+    await sql`DELETE FROM identity_observations WHERE source_id = ${otherSourceId}`;
+    await sql`DELETE FROM identity_sources WHERE source_id = ${otherSourceId}`;
     await sql`DELETE FROM organizations WHERE org_id = ${orgId}`;
     await sql`DELETE FROM users WHERE id = ${userId}`;
   }
