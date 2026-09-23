@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { parseIdentityFollowerConfig, type IdentityFollowerConfig } from '../connectors/erc8004/config.js';
 
 /**
@@ -104,6 +105,7 @@ export interface LlmEnrichmentConfig {
 
 export interface Config {
   readonly port: number;
+  readonly bindHost: string;
   readonly nodeEnv: string;
   readonly db: DbConfig;
   readonly oauth: OAuthConfig;
@@ -155,6 +157,7 @@ export function buildConfig(): Config {
 
   return {
     port: parsePositiveInt('PORT', optionalEnv('PORT', '3001')),
+    bindHost: parseBindHost(optionalEnv('BIND_HOST', '0.0.0.0')),
     nodeEnv,
     db: {
       url: requireEnv('DATABASE_URL'),
@@ -223,6 +226,12 @@ export function buildConfig(): Config {
     identityFollower: parseIdentityFollowerConfig(process.env['ERC8004_IDENTITY_CONFIG'],
       process.env['API_BASE_URL']),
   };
+}
+
+function parseBindHost(raw: string): string {
+  if (isIP(raw) !== 0) return raw;
+  console.error(`FATAL: BIND_HOST must be an IP address (got "${raw}")`);
+  process.exit(1);
 }
 
 function parseFederationMode(raw: string): FederationConfig['mode'] {

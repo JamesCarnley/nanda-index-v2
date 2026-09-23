@@ -80,12 +80,14 @@ describe('buildConfig', () => {
     process.env.DATABASE_URL = 'postgresql://u:p@localhost/db';
     delete process.env.SIGNING_PRIVATE_KEY;
     delete process.env.PORT;
+    delete process.env.BIND_HOST;
     delete process.env.NODE_ENV;
     delete process.env.SIGNING_KEY_ID;
     delete process.env.DB_MAX_CONNECTIONS;
 
     const cfg = buildConfig();
     expect(cfg.port).toBe(3001);  // default changed from 3000 in v2
+    expect(cfg.bindHost).toBe('0.0.0.0');
     expect(cfg.nodeEnv).toBe('development');
     expect(cfg.db.url).toBe('postgresql://u:p@localhost/db');
     expect(cfg.db.maxConnections).toBe(10);
@@ -96,6 +98,7 @@ describe('buildConfig', () => {
   it('applies overrides from env', () => {
     process.env.DATABASE_URL = 'x';
     process.env.PORT = '4000';
+    process.env.BIND_HOST = '127.0.0.1';
     process.env.NODE_ENV = 'production';
     // JWT_SECRET and COOKIE_SECRET must be set in production (auth hardening)
     process.env.JWT_SECRET = 'a-secret-that-is-long-enough-for-production-use';
@@ -105,6 +108,7 @@ describe('buildConfig', () => {
 
     const cfg = buildConfig();
     expect(cfg.port).toBe(4000);
+    expect(cfg.bindHost).toBe('127.0.0.1');
     expect(cfg.nodeEnv).toBe('production');
     expect(cfg.signing.keyId).toBe('custom');
     expect(cfg.db.maxConnections).toBe(20);
@@ -119,6 +123,16 @@ describe('buildConfig', () => {
     expect(() => buildConfig()).toThrow('__mock_exit__');
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
+
+  it.each(['localhost', '127.0.0.999', '127.0.0.1:3001'])(
+    'rejects a non-IP BIND_HOST value: %s', (bindHost) => {
+      process.env.DATABASE_URL = 'x';
+      process.env.BIND_HOST = bindHost;
+      const exitSpy = mockExit();
+      expect(() => buildConfig()).toThrow('__mock_exit__');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    },
+  );
 
   it('reads OAuth config from env', () => {
     process.env.DATABASE_URL = 'x';

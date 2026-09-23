@@ -90,6 +90,10 @@ database; a missing or unreachable database is a failure. `npm ci` currently
 reports the repository's inherited dependency audit findings; the Node.js 24
 runtime update does not claim to repair or suppress them.
 
+The API process binds to `0.0.0.0` by default. For a direct, loopback-only local
+demo, set `BIND_HOST=127.0.0.1` in its environment; only numeric IPv4/IPv6
+addresses are accepted. Keep the default for Docker-published deployments.
+
 ---
 
 ## Production Deployment

@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url';
-import Fastify from 'fastify';
-import { buildConfig } from './config/index.js';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { buildConfig, type Config } from './config/index.js';
 import { registerErrorHandler } from './plugins/errorHandler.js';
 import { registerHelmet } from './plugins/helmet.js';
 import { registerCors } from './plugins/cors.js';
@@ -73,6 +73,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   return { fastify, config };
 }
 
+export async function listenServer(
+  fastify: FastifyInstance,
+  config: Pick<Config, 'port' | 'bindHost'>,
+): Promise<void> {
+  await fastify.listen({ port: config.port, host: config.bindHost });
+}
+
 async function main(): Promise<void> {
   const { fastify, config } = await buildServer();
 
@@ -83,7 +90,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 
-  await fastify.listen({ port: config.port, host: '0.0.0.0' });
+  await listenServer(fastify, config);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
