@@ -35,6 +35,18 @@ function nonexistent(error: unknown): boolean {
   return false;
 }
 
+function responseBodyTooLarge(error: unknown): boolean {
+  const seen = new Set<object>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { name?: string; cause?: unknown };
+    if (candidate.name === 'ResponseBodyTooLargeError') return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export function createIdentityChainReader(config: IdentityFollowerConfig): IdentityChainReader {
   return {
     async assertNetwork(signal) {
@@ -64,10 +76,16 @@ export function createIdentityChainReader(config: IdentityFollowerConfig): Ident
       }
     },
     async changedAgents(from, to, signal) {
-      const logs = await clientFor(config, signal).getLogs({
-        address: config.registry, events: identityEvents,
-        fromBlock: BigInt(from), toBlock: BigInt(to),
-      });
+      let logs;
+      try {
+        logs = await clientFor(config, signal).getLogs({
+          address: config.registry, events: identityEvents,
+          fromBlock: BigInt(from), toBlock: BigInt(to),
+        });
+      } catch (error) {
+        if (responseBodyTooLarge(error)) throw new Error('IDENTITY_WORK_BUDGET');
+        throw error;
+      }
       if (logs.length > 1000) throw new Error('IDENTITY_WORK_BUDGET');
       const ids = new Set<string>();
       for (const log of parseEventLogs({ abi: identityEvents, logs, strict: true })) {

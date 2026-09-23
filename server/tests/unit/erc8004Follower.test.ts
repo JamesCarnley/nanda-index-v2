@@ -39,7 +39,8 @@ async function cleanup() {
   await sql`DELETE FROM identity_sources WHERE source_id = ${id}`;
 }
 beforeEach(async () => { await cleanup(); head = 3; changed = ['7']; fail = false;
-  mutateCheckpointDuringRead = false; hashes[2] = `0x${'cc'.repeat(32)}`; });
+  mutateCheckpointDuringRead = false; hashes[2] = `0x${'cc'.repeat(32)}`;
+  hashes[3] = `0x${'dd'.repeat(32)}`; });
 afterAll(async () => { await cleanup(); await closeSql(); });
 
 it('commits bounded ranges including no-change blocks and keeps a durable checkpoint', async () => {
@@ -77,6 +78,30 @@ it('withdraws when the prior checkpoint changes during the same tick', async () 
   expect(await syncIdentityOnce(config, reader)).toMatchObject({ checkpoint: null, progress: 'rebuilding' });
 });
 
+it('does not commit a target below head when the chain changes after its logs are read', async () => {
+  const base = fakeReader();
+  const reader = { ...base, async changedAgents() {
+    hashes[2] = `0x${'fa'.repeat(32)}`;
+    return [];
+  } };
+  expect(await syncIdentityOnce(config, reader)).toMatchObject({ checkpoint: null, progress: 'rebuilding' });
+  expect(await readLatestIdentity(agent)).toBeNull();
+});
+
+it('refuses a genesis reset after log reads, before a null-cursor commit', async () => {
+  const base = fakeReader();
+  let checks = 0;
+  const reader = { ...base, async assertNetwork() {
+    checks++;
+    if (checks === 2) throw new Error('IDENTITY_NETWORK_MISMATCH');
+  } };
+  await expect(syncIdentityOnce(config, reader)).rejects.toThrow('IDENTITY_NETWORK_MISMATCH');
+  expect(checks).toBe(2);
+  expect(await readIdentityCoverage(identitySourceFromConfig(config)))
+    .toMatchObject({ availability: 'unavailable', checkpoint: null });
+  expect(await readLatestIdentity(agent)).toBeNull();
+});
+
 it('reduces an over-budget range and advances only the bounded prefix', async () => {
   const calls: string[] = [];
   const reader = { ...fakeReader(), async changedAgents(_from: string, to: string) {
@@ -111,9 +136,37 @@ it('deduplicates out-of-order composite changes before committing observations',
   expect((await readIdentityCoverage(identitySourceFromConfig(config))).checkpoint).toEqual(at(2));
 });
 
+it('keeps a valid subject when another URI would exceed the serialized observation budget', async () => {
+  const base = fakeReader();
+  const reader = { ...base, async changedAgents() { return ['7', '8']; },
+    async identity(id: string, atBlock: ReturnType<typeof at>) {
+      const profile = await base.identity(id, atBlock);
+      if (profile === 'missing') return profile;
+      return id === '7' ? { ...profile, agentURI: '"'.repeat(40_000) } :
+        { ...profile, agentURI: dataUriFor({ ...originalRegistration,
+          registrations: [{ agentId: 8, agentRegistry: `eip155:11155111:${registry}` }] }) };
+    } };
+  await syncIdentityOnce(config, reader);
+  expect(await readLatestIdentity(agent)).toMatchObject({ qualification: 'unsupported',
+    reason: 'UNSUPPORTED_URI', agentURI: null, agentUriByteLength: 40_000 });
+  expect((await readLatestIdentity({ ...agent, agentId: '8' }))?.qualification).toBe('eligible');
+});
+
 it('refreshes coverage without a cursor when confirmation depth exceeds the head', async () => {
   const result = await syncIdentityOnce({ ...config, confirmations: 5 }, fakeReader());
   expect(result).toMatchObject({ checkpoint: null, observedHead: at(3), progress: 'initializing' });
+});
+
+it('does not publish a stale head when it reorgs during a coverage-only refresh', async () => {
+  const base = fakeReader();
+  const oldHead = at(3);
+  const reader = { ...base, async finalized() {
+    hashes[3] = `0x${'fa'.repeat(32)}`;
+    return null;
+  } };
+  expect(await syncIdentityOnce({ ...config, confirmations: 5 }, reader))
+    .toMatchObject({ checkpoint: null, observedHead: null, progress: 'rebuilding' });
+  expect(oldHead.hash).not.toBe(hashes[3]);
 });
 
 it('records a deterministic missing token but does not turn transport failures into missing', async () => {
@@ -140,6 +193,31 @@ it('does not commit after cancellation during the read path', async () => {
   await expect(syncIdentityOnce(config, reader, abort.signal)).rejects.toThrow('IDENTITY_TICK_ABORTED');
   expect((await readIdentityCoverage(identitySourceFromConfig(config))).checkpoint).toBeNull();
   expect(await readLatestIdentity(agent)).toBeNull();
+});
+
+it('cancels and awaits sibling reads before reporting the first subject failure', async () => {
+  const started: string[] = [];
+  let cancelled = 0;
+  const reader: IdentityChainReader = { ...fakeReader(),
+    async changedAgents() { return ['7', '8', '9', '10', '11']; },
+    async identity(id, _at, signal) {
+      started.push(id);
+      if (id === '7') throw new Error('FIRST_ID_FAILURE');
+      return await new Promise<never>((_resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('STALLED_READ')), 50);
+        signal?.addEventListener('abort', () => {
+          cancelled++;
+          clearTimeout(timeout);
+          reject(new Error('SIBLING_CANCELLED'));
+        }, { once: true });
+      });
+    },
+  };
+  await expect(syncIdentityOnce(config, reader)).rejects.toThrow('FIRST_ID_FAILURE');
+  expect(cancelled).toBe(3);
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  expect(started).toEqual(['7', '8', '9', '10']);
+  expect((await readIdentityCoverage(identitySourceFromConfig(config))).checkpoint).toBeNull();
 });
 
 it('refuses a reset genesis without advancing its cursor', async () => {

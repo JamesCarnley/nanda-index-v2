@@ -113,3 +113,23 @@ it('rejects a response above the two-MiB body budget', async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+it('classifies only an oversized log response as reducible work', async () => {
+  const oversized = 'x'.repeat(2 * 1024 * 1024 + 1);
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(oversized);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test listener missing');
+  try {
+    const reader = createIdentityChainReader({ ...base, rpcUrl: `http://127.0.0.1:${address.port}` });
+    await expect(reader.changedAgents('1', '2')).rejects.toThrow('IDENTITY_WORK_BUDGET');
+    await expect(reader.identity('7', { number: '2', hash: base.genesisHash, timestamp: 1 }))
+      .rejects.not.toThrow('IDENTITY_WORK_BUDGET');
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

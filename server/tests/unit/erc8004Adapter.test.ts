@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { originalAgent, originalCandidate, originalOwner, newOwner,
   originalRegistration, dataUriFor } from '../fixtures/cityProfile.js';
 import { qualifyCityProfile } from '../../src/connectors/erc8004/adapters/nandaCityV01.js';
+import { keccak256, stringToBytes } from 'viem';
 
 const block = { number: '42', hash: `0x${'bb'.repeat(32)}` as `0x${string}`, timestamp: 1790000000 };
 const input = { agent: originalAgent, block, owner: originalOwner, agentURI: originalCandidate.agentURI };
@@ -57,5 +58,13 @@ describe('pinned City 0.1 qualification', () => {
     expect(qualifyCityProfile({ ...input, agent: { ...originalAgent, agentId: '9007199254740992' } }))
       .toMatchObject({ agent: { agentId: '9007199254740992' }, qualification: 'unsupported',
         reason: 'UNSAFE_AGENT_ID', declaration: null });
+  });
+
+  it('bounds the complete serialized observation for an escaping-heavy URI', () => {
+    const uri = '"'.repeat(40_000);
+    const observation = qualifyCityProfile({ ...input, agentURI: uri });
+    expect(observation).toMatchObject({ qualification: 'unsupported', reason: 'UNSUPPORTED_URI',
+      agentURI: null, agentUriDigest: keccak256(stringToBytes(uri)), agentUriByteLength: 40_000 });
+    expect(Buffer.byteLength(JSON.stringify(observation), 'utf8')).toBeLessThanOrEqual(64 * 1024);
   });
 });

@@ -20,8 +20,12 @@ export function qualifyCityProfile(input: ProfileInput): IdentityObservation {
     agentURI: boundedUri && !decodedTooLarge ? input.agentURI : null,
     agentUriDigest: keccak256(bytes), agentUriByteLength: bytes.length,
   };
+  function withinObservationBudget(observation: IdentityObservation): boolean {
+    return Buffer.byteLength(JSON.stringify(observation), 'utf8') <= 64 * 1024;
+  }
   function withheld(qualification: Qualification, reason: string): IdentityObservation {
-    return { ...base, qualification, reason, declaration: null };
+    const observation: IdentityObservation = { ...base, qualification, reason, declaration: null };
+    return withinObservationBudget(observation) ? observation : { ...observation, agentURI: null };
   }
   if (!wellFormedUri) return withheld('invalid', 'INVALID_URI');
   if (!boundedUri || decodedTooLarge) return withheld('invalid', 'URI_TOO_LARGE');
@@ -53,6 +57,8 @@ export function qualifyCityProfile(input: ProfileInput): IdentityObservation {
       areaServed: profile['x-nandacity'].areaServed.map((area) => area['@id']),
       interfaces: ['application/a2a+json;version=0.3'],
     });
-    return { ...base, qualification: 'eligible', reason: null, declaration };
+    const observation: IdentityObservation = { ...base, qualification: 'eligible', reason: null, declaration };
+    return withinObservationBudget(observation) ? observation :
+      { ...base, agentURI: null, qualification: 'invalid', reason: 'OBSERVATION_TOO_LARGE', declaration: null };
   } catch { return withheld('invalid', 'INVALID_DECLARATION'); }
 }
