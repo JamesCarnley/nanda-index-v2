@@ -1,3 +1,5 @@
+import { parseIdentityFollowerConfig, type IdentityFollowerConfig } from '../connectors/erc8004/config.js';
+
 /**
  * Reads a required env var.
  * Prints FATAL to stderr and exits with code 1 if the variable is
@@ -116,6 +118,7 @@ export interface Config {
   readonly apiBaseUrl: string;
   readonly federation: FederationConfig;
   readonly llmEnrichment: LlmEnrichmentConfig;
+  readonly identityFollower: IdentityFollowerConfig | null;
 }
 
 /**
@@ -217,6 +220,8 @@ export function buildConfig(): Config {
         'OPENAI_ENRICHMENT_TIMEOUT_MS', optionalEnv('OPENAI_ENRICHMENT_TIMEOUT_MS', '8000'),
       ),
     },
+    identityFollower: parseIdentityFollowerConfig(process.env['ERC8004_IDENTITY_CONFIG'],
+      process.env['API_BASE_URL']),
   };
 }
 

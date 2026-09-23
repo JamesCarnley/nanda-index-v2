@@ -352,11 +352,40 @@ Two public read-only endpoints are available:
   observation JSON and its exact stored serialized bytes, even after source
   withdrawal. Malformed IDs return `400`; absent records return `404`.
 
-There is no public connector writer. This increment supplies storage and wire
-provenance only; it does not start an ERC-8004 follower, validate a remote
-AgentCard, establish a chain-backed owner at read time, or change ordinary
-organization publishing and generic search. Clients must independently choose
-their own chain access and verify any candidate they rely on.
+There is no public connector writer. The optional read-only follower starts only
+when `ERC8004_IDENTITY_CONFIG` is set to strict JSON with `rpcUrl`, `chainId`,
+`registry`, `genesisHash`, `startBlock`, `adapter`, `confirmations`, `pollMs` and
+`maxBlockSpan`. Unknown fields, malformed values, and a missing explicit
+`API_BASE_URL` fail startup. The checked-in local example uses a 2-second poll,
+200-block range and zero confirmations; zero confirmations means **provisional**
+local observations, not finality. No signer or private key is accepted by this
+setting. Disabled mode makes no RPC requests and leaves ordinary Index behavior
+unchanged; persisted chain observations and status remain visible.
+
+The follower checks configured chain ID and genesis, scans only the configured
+registry's registration, URI-update and transfer events, then reads owner and
+URI at a numbered block. It advances the durable checkpoint atomically with
+projection updates, including empty ranges. The reader limits RPC replies to
+2 MiB, requests to five seconds, a tick to 30 seconds, logs to 1,000 and changed
+agents to 100; an over-budget range is halved at most eight times. It issues at
+most four simultaneous identity reads. RPC outages retain the last successful
+basis and mark availability unavailable. A detected checkpoint or in-tick block
+hash change withdraws current source projections and replays from `startBlock`;
+retained historical observations remain available. A nonresponsive one-block
+range cannot advance. Startup and clean shutdown mark the configured source
+unavailable until a fresh successful read; after an unclean crash, timestamps
+are last-observed evidence, never a live heartbeat.
+
+`finalizedBlock` is null when the RPC cannot supply a consistent finalized tag.
+`confirmations` is a local depth policy, separate from finalized chain status;
+`availability`, `progress` and the observation block must not be conflated.
+These are RPC-derived observations, not cryptographic state proofs; a malicious
+or incomplete RPC may omit logs, and an upgradable registry's administrator can
+alter registry behavior. City qualification projects declared capabilities and
+geography with current owner binding only. It does not fetch or validate an
+AgentCard, authorize invocation, rank providers, or score service quality.
+Clients must independently choose chain access and verify any candidate they
+rely on.
 
 ---
 

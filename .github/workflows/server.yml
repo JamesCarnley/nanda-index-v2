@@ -56,6 +56,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --engine-strict
 
+      - name: Install pinned Foundry for owned-chain acceptance
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09
+        with:
+          version: v1.7.1
+          cache: false
+
       - name: Typecheck
         run: npm run typecheck
 

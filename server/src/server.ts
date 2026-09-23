@@ -6,6 +6,7 @@ import { registerHelmet } from './plugins/helmet.js';
 import { registerCors } from './plugins/cors.js';
 import { registerRateLimit } from './plugins/rateLimit.js';
 import { registerDb } from './plugins/db.js';
+import { registerIdentityFollower } from './plugins/identityFollower.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerCookiePlugin } from './plugins/cookie.js';
 import { registerJwtPlugin } from './plugins/jwt.js';
@@ -67,6 +68,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await registerServiceDiscoveryRoutes(fastify);
   await registerIdentityObservationRoutes(fastify);
   await registerResolveRoute(fastify);
+  await registerIdentityFollower(fastify, config.identityFollower);
 
   return { fastify, config };
 }

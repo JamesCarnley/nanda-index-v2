@@ -19,6 +19,9 @@ declare module 'fastify' {
 export async function registerDb(fastify: FastifyInstance): Promise<void> {
   fastify.decorate('db', getSql());
   fastify.addHook('onClose', async () => {
+    // The worker may still be inside a DB transaction. Enforce ordering even if
+    // Fastify's hook ordering or plugin encapsulation changes.
+    await fastify.stopIdentityFollower?.();
     await closeSql();
   });
 }
