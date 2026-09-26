@@ -27,10 +27,9 @@
     "@fastify/oauth2": "^8.2.0",
     "@fastify/rate-limit": "^11.0.0",
     "@fastify/swagger": "^9.7.0",
-    "@fastify/swagger-ui": "^5.2.6",
+    "@fastify/swagger-ui": "^6.1.1",
     "bcryptjs": "^3.0.3",
-    "fastify": "^5.1.0",
-    "nodemailer": "^8.0.10",
+    "fastify": "^5.12.1",
     "openai": "^6.48.0",
     "postgres": "^3.4.4",
     "resend": "^6.12.4",
@@ -40,9 +39,13 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "24.13.5",
-    "@types/nodemailer": "^8.0.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "vitest": {
+      "vite": "^6.4.3"
+    }
   }
 }

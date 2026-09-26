@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { runOwnedCommand, testEnvironment, validateDataIsolation, validateOwnership, validateSocket } from '../../scripts/test-owned-postgres.js';
 
@@ -39,7 +42,7 @@ it('refuses remote Docker endpoints and ownership mismatches before mutation', (
     expect(() => validateOwnership(expected, { ...expected, [key]: 'wrong' })).toThrow();
   }
 });
-it('opt-in prevents all environment-file reads while default setup still tries loading', () => {
+it('opt-in prevents setup environment-file reads while default setup still tries loading', () => {
   const probe = `let calls=0; process.loadEnvFile=()=>{calls++}; await import('./tests/setup.ts'); console.log(calls)`;
   for (const [optIn, expected] of [['1', '0'], ['0', '1']]) {
     const output = execFileSync(process.execPath, ['--input-type=module', '-e', probe], {
@@ -47,6 +50,27 @@ it('opt-in prevents all environment-file reads while default setup still tries l
     });
     expect(output.trim()).toBe(expected);
   }
+});
+it('opt-in disables early Vite environment loading while default loads only the owned canary', () => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'nanda-vite-env-'));
+  const configUrl = new URL('../../vitest.config.ts', import.meta.url).href;
+  const probe = `const {default:config}=await import(process.argv[1]);` +
+    `const {resolveConfig}=await import('vite');` +
+    `const resolved=await resolveConfig({...config,configFile:false,root:process.argv[2]},'serve','test');` +
+    `console.log(JSON.stringify({value:resolved.env.VITE_NANDA_OWNED_CANARY??null,envDir:resolved.envDir}))`;
+  try {
+    // This newly owned fixture is the only environment-file location Vite may inspect.
+    writeFileSync(join(fixtureRoot, '.env'), 'VITE_NANDA_OWNED_CANARY=synthetic-owned-value\n');
+    for (const optIn of ['1', '0']) {
+      const output = execFileSync(process.execPath, ['--input-type=module', '-e', probe, configUrl, fixtureRoot], {
+        env: { PATH: process.env['PATH'], NANDA_TEST_ENV_ONLY: optIn, NODE_ENV: 'test' }, encoding: 'utf8',
+      });
+      expect(JSON.parse(output.trim())).toEqual({
+        value: optIn === '1' ? null : 'synthetic-owned-value',
+        envDir: optIn === '1' ? false : fixtureRoot,
+      });
+    }
+  } finally { rmSync(fixtureRoot, { recursive: true, force: true }); }
 });
 it('accepts inspected tmpfs data and rejects persistent volumes or missing isolation', () => {
   expect(() => validateDataIsolation({ '/var/lib/postgresql/data': '' }, [])).not.toThrow();
