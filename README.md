@@ -391,6 +391,23 @@ AgentCard, authorize invocation, rank providers, or score service quality.
 Clients must independently choose chain access and verify any candidate they
 rely on.
 
+### Feedback observations and retained documents
+
+An independent, optional local feedback follower is enabled with strict JSON in
+`ERC8004_FEEDBACK_CONFIG`; absent/blank leaves it disabled. It follows all three
+ERC-8004 Reputation events, retains exact raw logs, and independently acquires
+digest-matching opaque documents from an administrator's exact literal-loopback
+HTTP allowlist. It requires no account or `API_BASE_URL`. RPC failures or no new
+blocks do not prevent durable document retries.
+
+Read-only source coverage, paged agent history, individual events and binary
+documents are available under `/api/ard/feedback`, including while the worker is
+disabled. Reads never fetch or mutate. Coverage, publication association and byte
+availability remain separate; no endpoint scores providers, validates feedback
+signatures or declares reviews active/unrevoked. See the
+[feedback boundary and synthetic configuration/API reference](server/FEEDBACK_STORE.md)
+for exact schemas, limits, reorg/cursor qualifications and safe local verification.
+
 ---
 
 ## Schema

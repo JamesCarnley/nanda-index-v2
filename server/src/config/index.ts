@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import { parseIdentityFollowerConfig, type IdentityFollowerConfig } from '../connectors/erc8004/config.js';
+import { parseFeedbackFollowerConfig, type FeedbackFollowerConfig } from '../connectors/erc8004/feedbackConfig.js';
 
 /**
  * Reads a required env var.
@@ -121,6 +122,7 @@ export interface Config {
   readonly federation: FederationConfig;
   readonly llmEnrichment: LlmEnrichmentConfig;
   readonly identityFollower: IdentityFollowerConfig | null;
+  readonly feedbackFollower: FeedbackFollowerConfig | null;
 }
 
 /**
@@ -225,6 +227,7 @@ export function buildConfig(): Config {
     },
     identityFollower: parseIdentityFollowerConfig(process.env['ERC8004_IDENTITY_CONFIG'],
       process.env['API_BASE_URL']),
+    feedbackFollower: parseFeedbackFollowerConfig(process.env['ERC8004_FEEDBACK_CONFIG']),
   };
 }
 

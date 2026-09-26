@@ -9,3 +9,7 @@ export const feedbackEvents = parseAbi([
   'event FeedbackRevoked(uint256 indexed agentId,address indexed clientAddress,uint64 indexed feedbackIndex)',
   'event ResponseAppended(uint256 indexed agentId,address indexed clientAddress,uint64 feedbackIndex,address indexed responder,string responseURI,bytes32 responseHash)',
 ]);
+export const feedbackRegistryReads = parseAbi([
+  'function getVersion() external pure returns (string)',
+  'function getIdentityRegistry() external view returns (address)',
+]);

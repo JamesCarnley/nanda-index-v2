@@ -1,9 +1,9 @@
-# Feedback persistence boundary
+# Feedback observation and persistence boundary
 
-This is a database/query layer, not a running chain follower, HTTP API, reputation
-score, or signature verifier. It retains attributed raw ERC-8004 feedback events
+The optional local follower and read-only API retain attributed raw ERC-8004 feedback events
 and digest-matching opaque document bytes. Every event/history read says
 `semantics: "not-evaluated"`. No read fetches a URL or initializes a source.
+There is no reputation score, signature verifier or active/unrevoked verdict.
 
 The event declarations are pinned in `src/connectors/erc8004/feedbackAbi.ts`.
 `ResponseAppended` indexes the responder, not the feedback index. Solidity
@@ -31,6 +31,11 @@ old recovery horizon is reached, including across repeated withdrawals.
 `withdrawFeedbackSource` optionally accepts `{previous, replacement}` BlockRefs.
 Only a same-height, different-hash conflict marks events from the old hash
 orphaned. Other withdrawn associations remain withdrawn, not proven orphaned.
+An atomic withdrawal can report `available` with a null checkpoint and
+`progress: "rebuilding"`: the source was reachable but no qualified canonical
+prefix remains. Availability alone is never sufficient to claim event coverage.
+Transport/network failure instead marks coverage unavailable using its original
+CAS version, so a stale failing worker cannot overwrite a newer successful scan.
 
 Batches implicitly cover `(expectedCheckpoint, through]`, or `[startBlock,
 through]` initially. Fingerprint/version/checkpoint CAS and a source row lock
@@ -42,13 +47,55 @@ Agent IDs and block numbers use uint256-safe decimal strings; feedback, log and
 transaction indices use uint64-safe strings. SQL uses exact numeric columns,
 not signed-bigint truncation. Logs are bounded to 64 KiB each, 1000 logs and 2 MiB
 per batch, counting decoded wire bytes plus fixed provenance fields. Entire
-overflowing batches are rejected. JSON/HTTP transport overhead needs its own
-bound in a future follower/API.
+overflowing batches are rejected. The follower additionally bounds each RPC
+response and serialized log batch to 2 MiB, with a 5-second whole-body request
+deadline and no redirects/retries. At most four event-block header reads run
+concurrently. Budget overflow halves the same contiguous range, with fresh
+through-block brackets, at most seven times. An oversized singleton stalls;
+it is never skipped or partially advanced.
+
+## Optional local follower configuration
+
+Unset or blank `ERC8004_FEEDBACK_CONFIG` disables both workers without creating
+a source. Existing identity/generic Index behavior is unchanged, and retained
+feedback remains readable. The value is one strict JSON object; this synthetic
+example needs replacement with your independently established local chain basis:
+
+```json
+{
+  "chainId": 31337,
+  "genesisHash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "identityRegistry": "0x2222222222222222222222222222222222222222",
+  "reputationRegistry": "0x3333333333333333333333333333333333333333",
+  "startBlock": "1",
+  "confirmations": 2,
+  "rpcUrl": "http://127.0.0.1:8545/",
+  "pollMs": 1000,
+  "maxBlockSpan": 128,
+  "documentUrls": ["http://127.0.0.1:9000/reviews/example?version=1"]
+}
+```
+
+No account or `API_BASE_URL` is required. `pollMs` is 100–60000 and
+`maxBlockSpan` is 1–128. There may be at most 64 distinct document URLs.
+RPC/document URLs must be canonical literal `http://127.0.0.1` URLs (at most
+2048 UTF-8 bytes), without credentials, fragments, whitespace, controls or
+backslashes. No DNS, alternate IP spellings, IPv6, wildcards or prefix matching.
+URL paths and queries are compared as exact strings; event URLs are never
+normalized into the allowlist. Empty allowlists are valid.
+
+Every scan has a 30-second total deadline and verifies chain/genesis, the pinned
+registry version `2.0.0`, and its `getIdentityRegistry()` linkage at the numbered
+basis. Saved checkpoint, range-through and observed-head headers are rechecked
+before commit; a changed finalized observation becomes unknown. No-new-block
+polls still recheck the chain and registry. These are RPC-derived observations,
+not code attestations, state proofs or protection against a malicious/truncating
+RPC. Reorgs after commit are detected on a later poll.
 
 ## Acquisition
 
 Claims select at most four pending jobs in due-time/event-ID order with row locks
-and `SKIP LOCKED`. Claims commit before any future network work. A lease is at
+and `SKIP LOCKED`. Claims commit before network work. A lease is at
 most 30 seconds; the returned `jobVersion` is the finish CAS token.
 `leaseExpiresAt` is explicit. Expired/superseded finishes cannot write a blob.
 Retry times must be later than `now` and at most 300 seconds away. Reasons are
@@ -57,10 +104,23 @@ must not be logged as raw URLs or errors containing credentials.
 
 The intrinsic acquisition profile supports literal loopback HTTP URLs only, up
 to 2048 UTF-8 bytes, without credentials, fragments, controls or backslashes.
-The future worker must additionally enforce its administrator's **exact** URL
+The worker additionally enforces its administrator's **exact** URL
 allowlist, deadlines, streaming size and redirect rules. A valid but unlisted URL
 stays pending with positive backoff (`url-not-allowed`), not terminally blocked.
 Responses are retained as raw events; their document content is not fetched.
+
+The scan and acquisition loops run independently and each awaits its work before
+the next poll. RPC outages and unchanged chains do not prevent due document work.
+At most four fetches run per sweep, each with a 5-second deadline through body EOF,
+HTTP 200, identity encoding and no redirects/credentials. Streaming reads stop at
+6144 bytes; Content-Length is only an early-rejection hint. Wrong hashes,
+oversized bodies, HTTP failures and timeouts remain retryable with capped positive
+backoff, without a terminal attempt count. An overflow's `actualSize` records
+bytes observed before cancellation, not an asserted complete body length.
+Existing matching blobs are reused before HTTP/policy checks. Shutdown aborts
+and awaits both loops (including DB work), then marks the source unavailable
+before the pool closes. Aborted claims expire and can be reclaimed after restart.
+An old available flag after a process crash is not evidence of current liveness.
 
 Blob insertion and job completion are one transaction. Keccak is recomputed on
 insert and document read; bytes are never decoded/reencoded as JSON. A different
@@ -93,6 +153,30 @@ may show an event readopted by replay after the previous page. Coverage,
 membership and event rows are read in one repeatable-read, read-only SQL snapshot.
 Document availability may change between pages. There is no cached active or
 unrevoked review verdict.
+
+## Read-only HTTP API
+
+All paths start with `/api/ard/feedback`. The routes remain installed when the
+worker is disabled, require no account, and perform no acquisition or mutation.
+
+| GET suffix | Shape |
+| --- | --- |
+| `/sources/:sourceId` | `coverage`, canonical-prefix `retention` counts including decimal-string `newFeedbackEvents`, `semantics` |
+| `/sources/:sourceId/agents/:agentId` | `basis`, `view`, `coverage`, `items`, `nextCursor`, `canonicalityBasis`, `semantics` |
+| `/events/:eventId` | `coverage`, `item`, `semantics`, all from one SQL snapshot |
+| `/documents/:digest` | Exact binary Buffer, application/octet-stream, nosniff and Content-Length |
+
+History accepts only `reviewer`, `view` (`canonical-prefix` default or
+`all-retained`), `pageSize` (1–100, default 20) and `cursor` (at most 4096
+characters). IDs and unsigned decimal values are strictly bounded; unknown
+query keys are rejected. Unknown sources on initial reads, events and blobs
+return 404 `NOT_FOUND`. Malformed input or filter-mismatched cursors return 400
+`INVALID_INPUT`. A well-formed continuation whose source/generation is no longer
+present (including a withdrawn generation) returns 409 `STALE_FEEDBACK_CURSOR`;
+a corrupt blob returns 500
+`FEEDBACK_DOCUMENT_INTEGRITY`, without bytes. Qualified JSON and errors are
+`no-store`. A missing blob means unavailable here, not nonexistent on chain.
+The digest endpoint supplies bytes, never canonical-publication evidence.
 
 ## Safe local verification
 

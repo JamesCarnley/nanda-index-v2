@@ -7,6 +7,7 @@ import { registerCors } from './plugins/cors.js';
 import { registerRateLimit } from './plugins/rateLimit.js';
 import { registerDb } from './plugins/db.js';
 import { registerIdentityFollower } from './plugins/identityFollower.js';
+import { registerFeedbackFollower } from './plugins/feedbackFollower.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerCookiePlugin } from './plugins/cookie.js';
 import { registerJwtPlugin } from './plugins/jwt.js';
@@ -22,6 +23,7 @@ import { registerArdRoutes } from './routes/ard.js';
 import { registerResolveRoute } from './routes/resolve.js';
 import { registerServiceDiscoveryRoutes } from './routes/service-discovery.js';
 import { registerIdentityObservationRoutes } from './routes/identity-observations.js';
+import { registerFeedbackObservationRoutes } from './routes/feedback-observations.js';
 
 export interface BuildServerOptions {
   logger?: boolean;
@@ -67,8 +69,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await registerArdRoutes(fastify);
   await registerServiceDiscoveryRoutes(fastify);
   await registerIdentityObservationRoutes(fastify);
+  await registerFeedbackObservationRoutes(fastify);
   await registerResolveRoute(fastify);
   await registerIdentityFollower(fastify, config.identityFollower);
+  await registerFeedbackFollower(fastify, config.feedbackFollower);
 
   return { fastify, config };
 }

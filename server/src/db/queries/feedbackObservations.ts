@@ -292,6 +292,16 @@ export async function readFeedbackEvent(input: string): Promise<FeedbackEventRec
     return row ? eventRecord(tx, row, (await getSource(tx, row.sourceId))!) : null;
   });
 }
+/** Event membership/document availability and source coverage share one read-only SQL snapshot. */
+export async function readFeedbackEventWithCoverage(input: string): Promise<{ coverage: FeedbackCoverage; item: FeedbackEventRecord } | null> {
+  const eventId = feedbackId(input);
+  return getSql().begin('isolation level repeatable read read only', async (tx) => {
+    const [row] = await tx<EventRow[]>`SELECT * FROM feedback_events WHERE event_id = ${eventId}`;
+    if (!row) return null;
+    const source = (await getSource(tx, row.sourceId))!;
+    return { coverage: await coverage(tx, source), item: await eventRecord(tx, row, source) };
+  });
+}
 type Cursor = { version: 1; sourceId: string; agentId: string; reviewer: string | null;
   view: FeedbackHistoryInput['view']; pageSize: number; order: 'block-transaction-log-event';
   generation: string; through: BlockRef | null; sequence: string;

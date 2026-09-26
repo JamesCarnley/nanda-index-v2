@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, expect, it, vi } from 'vitest';
 import type postgres from 'postgres';
 import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi } from 'viem';
 import { closeSql, getSql } from '../../src/db/client.js';
@@ -7,6 +7,7 @@ import * as q from '../../src/db/queries/feedbackObservations.js';
 import { feedbackEventId, feedbackSourceId } from '../../src/connectors/erc8004/feedbackValidation.js';
 import type { FeedbackBatch, FeedbackSource, RawFeedbackLog } from '../../src/connectors/erc8004/feedbackTypes.js';
 import type { BlockRef, Hex } from '../../src/connectors/erc8004/types.js';
+import { cleanupSources, source as uniqueSource } from '../fixtures/feedback.js';
 
 const H = (value: number): Hex => `0x${value.toString(16).padStart(64, '0')}`;
 const A = (value: number): Hex => `0x${value.toString(16).padStart(40, '0')}`;
@@ -14,9 +15,11 @@ const B = (number = '10', hash = H(Number(number) % 10000)): BlockRef => ({ numb
 const bytes = new Uint8Array([0, 255, 1]);
 const digest = keccak256(bytes);
 const now = '2026-01-01T00:00:00.000Z';
-let domain = 1000;
-const source = (): FeedbackSource => ({ chainId: 31337, genesisHash: H(++domain),
-  identityRegistry: A(2), reputationRegistry: A(3), startBlock: '10', confirmations: 0 });
+const ownedSources: FeedbackSource[] = [];
+const source = (): FeedbackSource => {
+  const value = { ...uniqueSource(), identityRegistry: A(2), reputationRegistry: A(3) };
+  ownedSources.push(value); return value;
+};
 const abi = parseAbi([
   'event NewFeedback(uint256 indexed agentId,address indexed clientAddress,uint64 feedbackIndex,int128 value,uint8 valueDecimals,string indexed indexedTag1,string tag1,string tag2,string endpoint,string feedbackURI,bytes32 feedbackHash)',
   'event FeedbackRevoked(uint256 indexed agentId,address indexed clientAddress,uint64 indexed feedbackIndex)',
@@ -45,12 +48,7 @@ const batch = (s: FeedbackSource, overrides: Partial<FeedbackBatch> = {}): Feedb
   logs: [log(s)], ...overrides });
 const history = (s: FeedbackSource, options = {}) => q.readFeedbackHistory({ sourceId: feedbackSourceId(s),
   agentId: '7', view: 'canonical-prefix', pageSize: 100, ...options });
-beforeEach(async () => {
-  const sql = getSql();
-  await sql`DELETE FROM feedback_fetch_jobs`; await sql`DELETE FROM feedback_membership`;
-  await sql`DELETE FROM feedback_events`; await sql`DELETE FROM feedback_sources`;
-  await sql`DELETE FROM feedback_documents`;
-});
+afterEach(async () => { await cleanupSources(ownedSources); ownedSources.length = 0; });
 afterAll(closeSql);
 
 it('reads unknown sources without initializing or mutating anything, with JSON-safe initializing coverage', async () => {
