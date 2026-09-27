@@ -8,6 +8,7 @@ import { registerRateLimit } from './plugins/rateLimit.js';
 import { registerDb } from './plugins/db.js';
 import { registerIdentityFollower } from './plugins/identityFollower.js';
 import { registerFeedbackFollower } from './plugins/feedbackFollower.js';
+import { registerOriginArchive } from './plugins/originArchive.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerCookiePlugin } from './plugins/cookie.js';
 import { registerJwtPlugin } from './plugins/jwt.js';
@@ -24,6 +25,7 @@ import { registerResolveRoute } from './routes/resolve.js';
 import { registerServiceDiscoveryRoutes } from './routes/service-discovery.js';
 import { registerIdentityObservationRoutes } from './routes/identity-observations.js';
 import { registerFeedbackObservationRoutes } from './routes/feedback-observations.js';
+import { registerOriginArchiveRoutes } from './routes/origin-archive.js';
 
 export interface BuildServerOptions {
   logger?: boolean;
@@ -70,9 +72,11 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await registerServiceDiscoveryRoutes(fastify);
   await registerIdentityObservationRoutes(fastify);
   await registerFeedbackObservationRoutes(fastify);
+  await registerOriginArchiveRoutes(fastify);
   await registerResolveRoute(fastify);
   await registerIdentityFollower(fastify, config.identityFollower);
   await registerFeedbackFollower(fastify, config.feedbackFollower);
+  await registerOriginArchive(fastify, config.originArchive);
 
   return { fastify, config };
 }
