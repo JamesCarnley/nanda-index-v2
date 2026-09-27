@@ -1,12 +1,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { encodeAbiParameters, toFunctionSelector } from 'viem';
+import type { FeedbackFollowerConfig } from '../../src/connectors/erc8004/feedbackConfig.js';
 import { createFeedbackReader, FeedbackBudgetError } from '../../src/connectors/erc8004/feedbackRpc.js';
 import { block, config, hash, log } from '../fixtures/feedback.js';
 
 type Call = { id: number; method: string; params: unknown[] };
 const closes: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const close of closes.splice(0)) await close(); });
+afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); for (const close of closes.splice(0)) await close(); });
+const httpsConfig = (): FeedbackFollowerConfig => ({ ...config(), rpcTransport: 'configured-https',
+  rpcUrl: 'https://feedback-rpc.invalid/private-path?key=synthetic' });
 async function http(handler: (req: IncomingMessage, res: ServerResponse) => void) {
   const server = createServer(handler); await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   closes.push(() => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }));
@@ -38,6 +41,84 @@ async function fixture() {
     transactionIndex: '0x0', logIndex: '0x0', address: raw.address, topics: raw.topics, data: raw.data, removed: false };
   return { c, calls, reader: createFeedbackReader(c), raw, wire, get result() { return result; }, set result(v) { result = v; } };
 }
+it('constructs a read-only HTTPS request to the exact configured endpoint', async () => {
+  const c = httpsConfig();
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    expect(input).toBe('https://feedback-rpc.invalid/private-path?key=synthetic');
+    expect(init).toMatchObject({ method: 'POST', redirect: 'error', credentials: 'omit',
+      headers: { 'content-type': 'application/json', 'accept-encoding': 'identity' }, signal: expect.any(AbortSignal) });
+    expect(JSON.parse(init!.body as string)).toEqual({ jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: ['0xa', false] });
+    expect(init).not.toHaveProperty('dispatcher');
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { number: '0xa', hash: hash(10), timestamp: '0x4d2' } }));
+  });
+  expect(await createFeedbackReader(c).block('10')).toEqual(block());
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+it('independently rejects invalid transport modes and URLs from direct callers', () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() => { throw new Error('unexpected RPC request'); });
+  for (const change of [
+    { rpcUrl: 'https://feedback-rpc.invalid/' },
+    { rpcTransport: 'https', rpcUrl: 'https://feedback-rpc.invalid/' },
+    { rpcTransport: 'https' }, { rpcTransport: null },
+    { rpcTransport: 'configured-https', rpcUrl: 'http://127.0.0.1:8545/' },
+    ...['https://feedback-rpc.invalid', 'https://u:p@feedback-rpc.invalid/', 'https://feedback-rpc.invalid:443/',
+      'https://feedback-rpc.invalid/a/../b', 'https://feedback-rpc.invalid/#', 'https://feedback-rpc.invalid/a\\b',
+      'https://feedback-rpc.invalid/\n', 'https://feedback-rpc.invalid/' + 'x'.repeat(2048)]
+      .map((rpcUrl) => ({ rpcTransport: 'configured-https', rpcUrl })),
+  ]) expect(() => createFeedbackReader({ ...config(), ...change } as FeedbackFollowerConfig)).toThrow();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it('redacts malformed configured endpoints before they can enter errors', () => {
+  expect(() => createFeedbackReader({ ...httpsConfig(), rpcUrl: 'https://feedback-rpc.invalid:99999/private-path?key=synthetic' }))
+    .toThrow(/^invalid feedback RPC URL$/);
+});
+it.each(['fetch', 'body', 'json', 'rpc'])('redacts HTTPS %s failures and never retries', async (kind) => {
+  const secret = 'https://feedback-rpc.invalid/private-path?key=synthetic';
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+    if (kind === 'fetch') throw new TypeError(secret);
+    if (kind === 'body') return new Response(new ReadableStream({ start(controller) { controller.error(new Error(secret)); } }));
+    if (kind === 'json') return new Response(secret);
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: secret, data: secret } }));
+  });
+  await expect(createFeedbackReader(httpsConfig()).block('10')).rejects.toThrow(
+    kind === 'rpc' ? /^feedback-rpc-fault$/ : /^feedback-rpc-failed$/);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+it('rejects HTTPS redirects without following or retrying them', async () => {
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null,
+    { status: 302, headers: { location: 'https://elsewhere.invalid/' } }));
+  await expect(createFeedbackReader(httpsConfig()).block('10')).rejects.toThrow(/^feedback-rpc-failed$/);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]![1]!.redirect).toBe('error');
+});
+it.each(['declared', 'streamed'])('keeps the 2 MiB HTTPS %s response budget', async (kind) => {
+  const cancelled = vi.fn();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1)); }, cancel: cancelled,
+  });
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body,
+    kind === 'declared' ? { headers: { 'content-length': String(2 * 1024 * 1024 + 1) } } : undefined));
+  await expect(createFeedbackReader(httpsConfig()).block('10')).rejects.toBeInstanceOf(FeedbackBudgetError);
+  if (kind === 'streamed') expect(cancelled).toHaveBeenCalledTimes(1);
+});
+it.each(['deadline', 'parent'])('aborts a pending HTTPS body on %s cancellation', async (kind) => {
+  vi.useFakeTimers(); const parent = new AbortController(); let activeSignal: AbortSignal | undefined;
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+    activeSignal = init!.signal!;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{'));
+        activeSignal!.addEventListener('abort', () => controller.error(new Error('synthetic endpoint detail')), { once: true });
+      },
+    }));
+  });
+  const result = createFeedbackReader(httpsConfig()).block('10', parent.signal);
+  const rejected = expect(result).rejects.toThrow(/^feedback-rpc-aborted$/);
+  await vi.advanceTimersByTimeAsync(4999); expect(activeSignal!.aborted).toBe(false);
+  if (kind === 'parent') parent.abort(); else await vi.advanceTimersByTimeAsync(1);
+  await rejected; expect(activeSignal!.aborted).toBe(true); expect(fetch).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
 it('qualifies chain, genesis and pinned version/link at the numbered basis', async () => {
   const f = await fixture(); await f.reader.assertNetwork(); await f.reader.assertRegistry(block());
   expect(f.calls.filter((c) => c.method === 'eth_call').map((c) => c.params[1])).toEqual(['0xa', '0xa']);

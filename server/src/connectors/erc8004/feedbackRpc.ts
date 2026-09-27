@@ -1,5 +1,5 @@
 import { decodeFunctionResult, encodeFunctionData, toEventSelector } from 'viem';
-import { feedbackLocalUrl, type FeedbackFollowerConfig } from './feedbackConfig.js';
+import { feedbackRpcUrl, type FeedbackFollowerConfig } from './feedbackConfig.js';
 import type { RawFeedbackLog } from './feedbackTypes.js';
 import type { BlockRef, Hex } from './types.js';
 import { feedbackEvents, feedbackRegistryReads } from './feedbackAbi.js';
@@ -25,7 +25,7 @@ const object = (value: unknown): Record<string, unknown> => {
 };
 const limit = 2 * 1024 * 1024;
 export function createFeedbackReader(config: FeedbackFollowerConfig): FeedbackReader {
-  const url = feedbackLocalUrl(config.rpcUrl); let requestId = 0;
+  const url = feedbackRpcUrl(config.rpcUrl, config.rpcTransport); let requestId = 0;
   async function rpc(method: string, params: unknown[], parent?: AbortSignal): Promise<unknown> {
     const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 5000);
     const signal = parent ? AbortSignal.any([parent, controller.signal]) : controller.signal;

@@ -1,6 +1,6 @@
 # Feedback observation and persistence boundary
 
-The optional local follower and read-only API retain attributed raw ERC-8004 feedback events
+The optional follower and read-only API retain attributed raw ERC-8004 feedback events
 and digest-matching opaque document bytes. Every event/history read says
 `semantics: "not-evaluated"`. No read fetches a URL or initializes a source.
 There is no reputation score, signature verifier or active/unrevoked verdict.
@@ -54,7 +54,7 @@ concurrently. Budget overflow halves the same contiguous range, with fresh
 through-block brackets, at most seven times. An oversized singleton stalls;
 it is never skipped or partially advanced.
 
-## Optional local follower configuration
+## Optional follower configuration
 
 Unset or blank `ERC8004_FEEDBACK_CONFIG` disables both workers without creating
 a source. Existing identity/generic Index behavior is unchanged, and retained
@@ -78,11 +78,33 @@ example needs replacement with your independently established local chain basis:
 
 No account or `API_BASE_URL` is required. `pollMs` is 100–60000 and
 `maxBlockSpan` is 1–128. There may be at most 64 distinct document URLs.
-RPC/document URLs must be canonical literal `http://127.0.0.1` URLs (at most
+By default, RPC/document URLs must be canonical literal `http://127.0.0.1` URLs (at most
 2048 UTF-8 bytes), without credentials, fragments, whitespace, controls or
 backslashes. No DNS, alternate IP spellings, IPv6, wildcards or prefix matching.
 URL paths and queries are compared as exact strings; event URLs are never
 normalized into the allowlist. Empty allowlists are valid.
+
+An administrator may instead add `"rpcTransport": "configured-https"` and set
+`rpcUrl` to an exact canonical HTTPS endpoint, for example
+`"https://feedback-rpc.invalid/read-only?key=synthetic"` (synthetic, not a live
+service). This is an explicit trust decision over the complete endpoint,
+including its path/query; it is not a public-IP or DNS firewall. The setting is
+server administrator configuration only, never an agent/card/event input or a
+public configuration route. HTTPS is rejected without this opt-in; unknown
+transport values and HTTP in HTTPS mode are rejected without fallback.
+
+Configured HTTPS URLs have the same 2048 UTF-8-byte maximum and prohibit
+credentials/userinfo, fragments, whitespace, controls and backslashes. Any
+WHATWG URL normalization change is rejected (including a missing trailing slash,
+default-port spelling or dot segments). Platform TLS verification, omitted
+credentials, no redirects/retries, the 5-second whole-body deadline, parent
+cancellation and 2 MiB response cap remain in force. The reader still exposes
+only its existing chain/block/log and pinned registry reads, with no wallet,
+submission or arbitrary-method interface. Keep endpoint path/query secrets in
+administrator configuration; RPC transport errors are sanitized and transport settings are
+excluded from retained source identifiers and configuration fingerprints.
+Document allowlisting/acquisition remains literal-loopback HTTP only in either
+RPC mode. This opt-in does not establish public-chain or archive readiness.
 
 Every scan has a 30-second total deadline and verifies chain/genesis, the pinned
 registry version `2.0.0`, and its `getIdentityRegistry()` linkage at the numbered

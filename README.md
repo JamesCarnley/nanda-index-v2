@@ -393,11 +393,14 @@ rely on.
 
 ### Feedback observations and retained documents
 
-An independent, optional local feedback follower is enabled with strict JSON in
+An independent, optional feedback follower is enabled with strict JSON in
 `ERC8004_FEEDBACK_CONFIG`; absent/blank leaves it disabled. It follows all three
 ERC-8004 Reputation events, retains exact raw logs, and independently acquires
 digest-matching opaque documents from an administrator's exact literal-loopback
-HTTP allowlist. It requires no account or `API_BASE_URL`. RPC failures or no new
+HTTP allowlist. RPC defaults to literal-loopback HTTP; an administrator can
+explicitly select `rpcTransport: "configured-https"` for one exact HTTPS endpoint.
+This does not extend document acquisition or provide a DNS/public-IP firewall.
+It requires no account or `API_BASE_URL`. RPC failures or no new
 blocks do not prevent durable document retries.
 
 Read-only source coverage, paged agent history, individual events and binary
